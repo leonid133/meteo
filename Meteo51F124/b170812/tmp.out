@@ -1,0 +1,8 @@
+
+BL51 BANKED LINKER/LOCATER V6.22 - SN: K1SMC-S3H2GC
+COPYRIGHT KEIL ELEKTRONIK GmbH 1987 - 2009
+"C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init.obj",
+"C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\servo.obj"  TO "C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init" RS(256) PL(68) PW(78)  
+
+Program Size: data=24.5 xdata=306 code=5011
+LINK/LOCATE RUN COMPLETE.  0 WARNING(S),  0 ERROR(S)

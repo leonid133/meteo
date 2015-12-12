@@ -1,0 +1,164 @@
+<?xml version='1.0' encoding='utf-8' ?>
+<!-- C++Builder XML Project -->
+<PROJECT>
+  <MACROS>
+    <VERSION value="BCB.06.00"/>
+    <PROJECT value="CommTest.exe"/>
+    <OBJFILES value="CommTest.obj Main.obj About.obj"/>
+    <RESFILES value="CommTest.res"/>
+    <IDLFILES value=""/>
+    <IDLGENFILES value=""/>
+    <DEFFILE value=""/>
+    <RESDEPEN value="$(RESFILES) Main.dfm About.dfm"/>
+    <LIBFILES value=""/>
+    <LIBRARIES value="rxctl6.lib vclx.lib bcbsmp.lib Comm.lib vcl.lib rtl.lib"/>
+    <SPARELIBS value="rtl.lib vcl.lib Comm.lib bcbsmp.lib vclx.lib rxctl6.lib"/>
+    <PACKAGES value="rtl.bpi vcl.bpi vclx.bpi bcbsmp.bpi ibsmp.bpi dclocx.bpi RXCTL.bpi"/>
+    <PATHCPP value=".;"/>
+    <PATHPAS value=".;"/>
+    <PATHRC value=".;"/>
+    <PATHASM value=".;"/>
+    <DEBUGLIBPATH value="$(BCB)\lib\debug"/>
+    <RELEASELIBPATH value="$(BCB)\lib\release"/>
+    <LINKER value="ilink32"/>
+    <USERDEFINES value="_DEBUG"/>
+    <SYSDEFINES value="NO_STRICT"/>
+    <MAINSOURCE value="CommTest.cpp"/>
+    <INCLUDEPATH value="..\..\VCL\RX\Units;..\..\VCL\SlyComm;$(BCB)\include;$(BCB)\include\vcl"/>
+    <LIBPATH value="..\..\VCL\RX\Units;..\..\VCL\SlyComm;$(BCB)\Projects\lib;..\..\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib"/>
+    <WARNINGS value="-w-par -w-8027 -w-8026"/>
+    <WARNOPTSTR value=""/>
+    <OTHERFILES value=""/>
+  </MACROS>
+  <OPTIONS>
+    <IDLCFLAGS value="-I..\..\VCL\RX\Units -I..\..\VCL\SlyComm -I$(BCB)\include 
+      -I$(BCB)\include\vcl -src_suffix cpp -D_DEBUG -boa"/>
+    <CFLAG1 value="-Od -H=c:\PROGRA~1\borland\CBUILD~1\lib\vcl60.csm -Hc -Vx -Ve -Tkh30000 
+      -ff -X- -r- -a8 -b- -k -y -v -vi- -c -tW -tWM"/>
+    <PFLAGS value="-$Y+ -$W -$O- -$A8 -v -M -JPHNE"/>
+    <RFLAGS value=""/>
+    <AFLAGS value="/mx /w2 /zi"/>
+    <LFLAGS value="-D&quot;&quot; -aa -Tpe -x -Gn -v"/>
+    <OTHERFILES value=""/>
+  </OPTIONS>
+  <LINKER>
+    <ALLOBJ value="c0w32.obj sysinit.obj $(OBJFILES)"/>
+    <ALLRES value="$(RESFILES)"/>
+    <ALLLIB value="$(LIBFILES) $(LIBRARIES) import32.lib cp32mt.lib"/>
+    <OTHERFILES value=""/>
+  </LINKER>
+  <FILELIST>
+      <FILE FILENAME="CommTest.cpp" FORMNAME="" UNITNAME="CommTest" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="CommTest.res" FORMNAME="" UNITNAME="CommTest" CONTAINERID="ResTool" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="Main.cpp" FORMNAME="Form1" UNITNAME="Main" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="About.cpp" FORMNAME="Form2" UNITNAME="About" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+  </FILELIST>
+  <BUILDTOOLS>
+  </BUILDTOOLS>
+
+  <IDEOPTIONS>
+[Version Info]
+IncludeVerInfo=1
+AutoIncBuild=1
+MajorVer=1
+MinorVer=5
+Release=0
+Build=17
+Debug=0
+PreRelease=0
+Special=0
+Private=0
+DLL=0
+Locale=1033
+CodePage=1252
+
+[Version Info Keys]
+CompanyName=slydiman@mail.ru; http://slydiman.narod.ru
+FileDescription=COM port watcher
+FileVersion=1.5.0.17
+InternalName=
+LegalCopyright=Copyright (C) 2003 by Dmitry Vassiliev
+LegalTrademarks=
+OriginalFilename=CommTest.exe
+ProductName=CommTest
+ProductVersion=1.5.0.17
+Comments=Cool for debugging serial devices!
+
+[Excluded Packages]
+c:\program files\borland\cbuilder6\Bin\dclsoap60.bpl=Borland SOAP Components
+c:\program files\borland\cbuilder6\Projects\Bpl\wmcd.bpl=wmcd
+
+[HistoryLists\hlIncludePath]
+Count=9
+Item0=..\..\VCL\RX\Units;..\..\VCL\SlyComm;$(BCB)\include;$(BCB)\include\vcl
+Item1=..\..\..\Program Files\Borland\CBuilder4\Bin;..\..\VCL\RX\Units;..\..\VCL\CommPort;..\..\mssdk\include;$(BCB)\include;$(BCB)\include\vcl
+Item2=..\..\VCL\CommPort;..\..\mssdk\include;$(BCB)\include;$(BCB)\include\vcl
+Item3=..\..\mssdk\include;$(BCB)\include;$(BCB)\include\vcl
+Item4=..\..\..\..\prog\mssdk\include;$(BCB)\include;$(BCB)\include\vcl
+Item5=c:\prog\mssdk\include;$(BCB)\include;$(BCB)\include\vcl
+Item6=$(BCB)\include;$(BCB)\include\vcl
+Item7=$(BCB)\include;$(BCB)\include\vcl;c:\prog\scitech\INCLUDE
+Item8=$(BCB)\include;$(BCB)\include\vcl;$(MGL_ROOT)\INCLUDE
+
+[HistoryLists\hlLibraryPath]
+Count=11
+Item0=..\..\VCL\RX\Units;..\..\VCL\SlyComm;$(BCB)\Projects\lib;..\..\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item1=..\..\..\Program Files\Borland\CBuilder4\Bin;..\..\VCL\RX\Units;..\..\VCL\CommPort;$(BCB)\Projects\lib;..\..\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item2=..\..\VCL\CommPort;$(BCB)\Projects\lib;..\..\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item3=$(BCB)\Projects\lib;..\..\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item4=$(BCB)\Projects\lib;..\..\..\..\prog\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item5=..\DirectD;..\..\..\..\prog\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item6=..\..\..\..\prog\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item7=c:\prog\mssdk\lib\borland;$(BCB)\lib\obj;$(BCB)\lib
+Item8=$(BCB)\lib\obj;$(BCB)\lib
+Item9=$(BCB)\lib\obj;$(BCB)\lib;c:\prog\scitech\LIB
+Item10=$(BCB)\lib\obj;$(BCB)\lib;$(MGL_ROOT)\LIB
+
+[HistoryLists\hlDebugSourcePath]
+Count=1
+Item0=$(BCB)\source\vcl
+
+[HistoryLists\hlConditionals]
+Count=2
+Item0=_DEBUG
+Item1=_RTLDLL
+
+[HistoryLists\hlIntOutputDir]
+Count=1
+Item0=c:\prog\vcl\temp
+
+[HistoryLists\hlFinalOutputDir]
+Count=1
+Item0=c:\prog\vcl\temp
+
+[HistoryLists\hIBPIOutputDir]
+Count=2
+Item0=c:\prog\vclItem1=c:\prog\vcl
+Item1=
+
+[Debugging]
+DebugSourceDirs=$(BCB)\source\vcl
+
+[Parameters]
+RunParams=
+Launcher=
+UseLauncher=0
+DebugCWD=
+HostApplication=
+RemoteHost=
+RemotePath=
+RemoteLauncher=
+RemoteCWD=
+RemoteDebug=0
+
+[Compiler]
+ShowInfoMsgs=0
+LinkDebugVcl=0
+LinkCGLIB=0
+
+[CORBA]
+AddServerUnit=1
+AddClientUnit=1
+PrecompiledHeaders=1
+  </IDEOPTIONS>
+</PROJECT>

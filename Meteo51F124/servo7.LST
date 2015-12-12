@@ -1,0 +1,797 @@
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE SERVO7
+OBJECT MODULE PLACED IN servo7.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.exe servo7.c DB OE BR
+
+line level    source
+
+   1          
+   2          #include "c8051f120.h"
+   3          #include "init.h"
+   4          #include "comport.h"
+   5          #include <intrins.h>
+   6          #include <ctype.h>
+   7          #include <stdio.h>
+   8          #include <stdlib.h>
+   9          #include <math.h> 
+  10          //system
+  11          #define SYSCLK      24883200  // (24856840L * 1 / 1) 
+  12          #define FREQT0 1183 //Hz
+  13          
+  14          //сигнальные
+  15          sbit P3_3 = P3^3;
+  16          sbit LED = P1^6;
+  17          sbit LED2 = P2^6;
+  18          sbit BUTTON = P3^7;
+  19          xdata unsigned char InitFlag;
+  20          xdata unsigned int iter;
+  21          
+  22          //ADC
+  23          sfr16 ADC0     = 0xbe;   // ADC0 data
+  24          bit DavlFlag = 0;
+  25          xdata long Result;                    
+  26          xdata unsigned int_dec = 256;    
+  27          xdata long accumulator = 0L;       
+  28          
+  29          //LIR
+  30          sbit LIR_DATA = P2^0; //P2^2;
+  31          sbit LIR_SCK = P2^1;
+  32          xdata unsigned int LData;
+  33          xdata float A = 0, A_pr = 0, A_zad = 0, A_zad_pr = 0, V = 0, V_pr = 0, V_zad = 0, V_zad_pr = 0, u = 0, u_z
+             -ad = 0/*, Accel=0*/, tau=0.0, K = 40.;
+  34          
+  35          typedef union INT {                   
+  36             unsigned int i;
+  37             unsigned char b[2];
+  38          } INT;
+  39          
+  40          xdata int  UgolMaxV = 180, Vmax = 200, Umax = 200;
+  41          xdata float taumax = 0.000025;
+  42          //Veter
+  43          bit VeterFlag = 0;
+  44          sbit WSpeed = P1^1;
+  45          sbit WAngle = P1^3;
+  46          
+  47          xdata float Vspeed=0, Angle=0;
+  48          xdata unsigned long RTC, RTCV, RTCA;
+  49          xdata unsigned long TV,TA;
+  50          
+  51          typedef union FLOAT {                   
+  52             float f;
+  53             unsigned char b[4];
+  54          } FLOAT;
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 2   
+
+  55          //UART0
+  56          #define NBFM            50
+  57          xdata unsigned char BuferFromModem [NBFM]; 
+  58          xdata unsigned char wBFM, rBFM, marBFM;
+  59          xdata unsigned int u0timer;
+  60          
+  61          #define SIZE_BUFFER0            50
+  62          xdata char BufferInModem[SIZE_BUFFER0]; 
+  63          xdata int r0, rk;
+  64          bit flTransmiter;       
+  65          
+  66          //GPS
+  67          typedef union LINT {                   
+  68             unsigned long i;
+  69             unsigned char b[4];
+  70          } LINT;
+  71          #define NS      75
+  72          xdata char mess [NS], r, w, mar;                
+  73          bit flNewGPS;
+  74          xdata unsigned int Vz, koors, flNoKoord, liTimer_tick_GPS, liTimer_tick;
+  75          xdata unsigned long LatGnd=0, LonGnd=0;
+  76          //------------------------------------------------------------------------------
+  77          void OutModem1(unsigned char Data, char i)
+  78          {
+  79   1              BufferInModem[i] = Data | 0x80;
+  80   1      }
+  81          
+  82          //------------------------------------------------------------------------------
+  83          void OutModem2(unsigned int Data, char i)
+  84          {
+  85   1              BufferInModem[i] = (Data & 0x007f)| 0x80;
+  86   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7)| 0x80;
+  87   1      }
+  88          
+  89          //------------------------------------------------------------------------------
+  90          void OutModem4(unsigned long int Data, char i)
+  91          {
+  92   1              BufferInModem[i] = (Data & 0x0000007f)| 0x80;
+  93   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7) | 0x80;
+  94   1              BufferInModem[i+2] = ((Data & 0x1fc000) >> 14) | 0x80;
+  95   1         BufferInModem[i+3] = ((Data & 0xfe00000)>> 21) | 0x80;
+  96   1      }
+  97          //------------------------------------------------------------------------------------
+  98          void main(void)
+  99          {
+ 100   1      //ADC
+ 101   1              xdata long Pressure = 0;
+ 102   1              xdata float PressureFl = 0.0;
+ 103   1      //UART
+ 104   1      //   xdata char RK_code[26], nByte = 0, KontrSumma = 0, PWM;
+ 105   1      //        unsigned int Value;
+ 106   1              INT Aint;
+ 107   1              FLOAT Bfloat;
+ 108   1              LINT tmpLong;
+ 109   1      //GPS
+ 110   1         bit ValidGPS, flPoint;       
+ 111   1              xdata unsigned char i_comma, tmpGPS[6], nLetter = 7;
+ 112   1              xdata unsigned long temp_koord;
+ 113   1              xdata unsigned int i;
+ 114   1      
+ 115   1         xdata unsigned char chtmp;
+ 116   1              xdata int tmp;
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 3   
+
+ 117   1      
+ 118   1              EA = 0;
+ 119   1              WDTCN     = 0xDE;       //выкл собаки
+ 120   1         WDTCN     = 0xAD;
+ 121   1              EA= 1;   
+ 122   1              
+ 123   1              LED=0;
+ 124   1      
+ 125   1              Port_IO_Init();
+ 126   1              Oscillator_Init();   
+ 127   1              Interrupts_Init(); 
+ 128   1              Timer_Init();
+ 129   1              UART0_Init();
+ 130   1         UART1_Init();
+ 131   1              PCA_Init();
+ 132   1         ADC_Init();
+ 133   1      
+ 134   1      //      LirTarget = 0x03ff;
+ 135   1      //      Fdelta = 0;
+ 136   1              flNewGPS = 0;
+ 137   1              u0timer=0;
+ 138   1              while(1)
+ 139   1              {
+ 140   2      //ADC
+ 141   2                      EIP2 |= 0x02;
+ 142   2                      if(DavlFlag==1)
+ 143   2                      {
+ 144   3                              EA = 0; 
+ 145   3                              Pressure =  Result * 2430 / 4095;
+ 146   3                              EA = 1; 
+ 147   3                              DavlFlag = 0;
+ 148   3                              PressureFl = PressureFl + (Pressure - PressureFl)*0.5;
+ 149   3                              LED2=!LED2;
+ 150   3                      }
+ 151   2      
+ 152   2      //Veter
+ 153   2                      if(VeterFlag==1)
+ 154   2                      {
+ 155   3                              Vspeed = (float)FREQT0/((float)TV*0.75);        //???
+ 156   3                              Angle = 360. - (360.*(float)TV/(float)TA);
+ 157   3                              VeterFlag = 0;
+ 158   3                      }
+ 159   2      
+ 160   2                      //GPS---------------------------------------------------------------------------
+ 161   2                      if(flNewGPS == 1)       
+ 162   2                      {
+ 163   3                              flNewGPS = 0;
+ 164   3                              if (r < w+mar*NS) 
+ 165   3                              {
+ 166   4                                      if(mess[r] == '$')
+ 167   4                                      {
+ 168   5                      nLetter = 0;
+ 169   5                                      }
+ 170   4                      else if ((nLetter == 0) && (mess[r] == 'G'))
+ 171   4                      nLetter++;
+ 172   4                      else if ((nLetter == 1) && (mess[r] == 'P'))
+ 173   4                      nLetter++;
+ 174   4                      else if ((nLetter == 2) && (mess[r] == 'R'))
+ 175   4                      nLetter++;
+ 176   4                       else if ((nLetter == 3) && (mess[r] == 'M'))
+ 177   4                       nLetter++;
+ 178   4                 else if ((nLetter == 4) && (mess[r] == 'C'))
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 4   
+
+ 179   4                      {
+ 180   5                      nLetter++;
+ 181   5                                              i_comma = 0;
+ 182   5                                              ValidGPS = 0;
+ 183   5                 } 
+ 184   4                              else if(mess[r] == ',')
+ 185   4                                      {
+ 186   5                                              i_comma++;
+ 187   5                                              i = 0;
+ 188   5                                              flPoint = 0;
+ 189   5                                      }
+ 190   4                              else if(i_comma == 2)
+ 191   4                                      {
+ 192   5                                              if(mess[r] == 'A') 
+ 193   5                                                      ValidGPS = 1;
+ 194   5                                              else
+ 195   5                                              {
+ 196   6                                                      ValidGPS = 0;
+ 197   6              //                                      flNoKoord = 1;
+ 198   6              //                                      liTimer_tick_GPS = liTimer_tick;
+ 199   6                                              }
+ 200   5                                      }
+ 201   4                      else if (ValidGPS)
+ 202   4                                      {
+ 203   5                                              if (i_comma == 3)                                       //Latitude
+ 204   5                                              {
+ 205   6                                                      if(mess[r] == '.')
+ 206   6                                                      {
+ 207   7                                                              flPoint = 1;
+ 208   7                                                              i = 0;
+ 209   7                                                      }
+ 210   6                                                      else if (flPoint == 0)                                          //celaya chast
+ 211   6                                                      {
+ 212   7                                                              tmpGPS[i++] = mess[r];
+ 213   7                                                              if(i == 2)
+ 214   7                                                              {
+ 215   8                                              tmpGPS[i] = 0;
+ 216   8                                                                      temp_koord = atoi(tmpGPS);
+ 217   8                                              temp_koord = 60UL*10000*temp_koord;
+ 218   8                                                              }       
+ 219   7                                                              else if(i == 4)
+ 220   7                                                              {
+ 221   8                                                                      tmpGPS[0] = tmpGPS[1] = '0';
+ 222   8                                              tmpGPS[i] = 0;
+ 223   8                                              temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 224   8                                                              }       
+ 225   7                                                      }
+ 226   6                                                      else                                                                                            //drobnaya chast
+ 227   6                                                      {
+ 228   7                                                              tmpGPS[i++] = mess[r];
+ 229   7                                      tmpGPS[i] = 0;
+ 230   7                                                      }
+ 231   6                                              }
+ 232   5                                              else if (i_comma == 4)
+ 233   5                                              {
+ 234   6                                      temp_koord = temp_koord+atoi(tmpGPS);
+ 235   6      //-----------
+ 236   6      //lLatGnd = 55UL*60*10000+50UL*10000+8680;
+ 237   6      //--------
+ 238   6                                                      if (mess[r] == 'S')                                             //znak Latitude
+ 239   6                                                              LatGnd = 54000000UL-temp_koord;         //90UL*60*10000-koord;
+ 240   6                                                      else              
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 5   
+
+ 241   6                                                              LatGnd = 54000000UL+temp_koord;         //90UL*60*10000+koord;
+ 242   6                                              }
+ 243   5                                              else if (i_comma == 5)                          //Longitude
+ 244   5                                              {
+ 245   6                                                      if(mess[r] == '.')
+ 246   6                                                      {
+ 247   7                                                              flPoint = 1;
+ 248   7                                                              i = 0;
+ 249   7                                                      }
+ 250   6                                                      else if (flPoint == 0)                                          //celaya chast
+ 251   6                                                      {
+ 252   7                                                              tmpGPS[i++] = mess[r];
+ 253   7                                                              if(i == 3)
+ 254   7                                                              {
+ 255   8                                              tmpGPS[i] = 0;
+ 256   8                                              temp_koord = atoi(tmpGPS);
+ 257   8                                              temp_koord = 60UL*10000*temp_koord;
+ 258   8                                                              }       
+ 259   7                                                              else if(i == 5)
+ 260   7                                                              {
+ 261   8                                                                      tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+ 262   8                                              tmpGPS[i] = 0;
+ 263   8                                              temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 264   8                                                              }       
+ 265   7                                                      }
+ 266   6                                                      else                                                                                            //drobnaya chast
+ 267   6                                                      {
+ 268   7                                                              tmpGPS[i++] = mess[r];
+ 269   7                                      tmpGPS[i] = 0;
+ 270   7                                                      }
+ 271   6                                              }
+ 272   5                                              else if (i_comma == 6)
+ 273   5                                              {
+ 274   6                                      temp_koord = temp_koord+atoi(tmpGPS);
+ 275   6      //----------------
+ 276   6      //lLonGnd = 49UL*60*10000+6UL*10000+3760;
+ 277   6      //----------------
+ 278   6                                                      if (mess[r] == 'W')                                             //znak Longitude
+ 279   6                                                              LonGnd = 108000000UL-temp_koord;                //180UL*60*10000-koord;
+ 280   6                                                      else       
+ 281   6                                                              LonGnd = temp_koord+108000000UL;                //180UL*60*10000;
+ 282   6                                              }
+ 283   5                                              else if (i_comma == 7)                                                  //skorost v uzlah
+ 284   5                                              {
+ 285   6                                                      if(mess[r] == '.')
+ 286   6                                                      {
+ 287   7                                                              flPoint = 1;
+ 288   7                                      Vz = 1.852*atoi(tmpGPS)/3.6;            //preobrazovat iz uzlov v m/s
+ 289   7      //---------
+ 290   7      //Vz = 20;
+ 291   7      //-----------
+ 292   7                                                      }
+ 293   6                                                      else if(flPoint == 0)
+ 294   6                                                      {
+ 295   7                                                              tmpGPS[i++] = mess[r];
+ 296   7                                      tmpGPS[i] = 0;
+ 297   7                                                      }
+ 298   6                      }
+ 299   5                                              else if (i_comma == 8)                                                  //kurs v gradusah
+ 300   5                                              {
+ 301   6                                                      if(mess[r] == '.')
+ 302   6                                                      {
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 6   
+
+ 303   7                                                              flPoint = 1;
+ 304   7                                      koors = atoi(tmpGPS);
+ 305   7                              if (koors < 0)
+ 306   7                              koors = 360+koors;
+ 307   7                                                              flNoKoord = 0;
+ 308   7                                                              flNewGPS = 1;
+ 309   7                                                              liTimer_tick_GPS = liTimer_tick;        
+ 310   7              //                          OutModem20();
+ 311   7      //-----------                                              
+ 312   7      //koors = 30;
+ 313   7      //-----------
+ 314   7                                                      }
+ 315   6                                                      else if(flPoint == 0)
+ 316   6                                                      {
+ 317   7                                                              tmpGPS[i++] = mess[r];
+ 318   7                                      tmpGPS[i] = 0;
+ 319   7                                                      }
+ 320   6                          }
+ 321   5                                      }
+ 322   4                                      r++;
+ 323   4                              if(r >= NS)
+ 324   4                                      {
+ 325   5                              r = 0;
+ 326   5                                              mar = 0;        
+ 327   5                                      }      
+ 328   4                              }
+ 329   3                      }
+ 330   2      
+ 331   2                      //---------------------------------------------------------------------
+ 332   2      //              if(u0timer > (3*FREQT0))
+ 333   2                      if((flTransmiter == 0) && (u0timer > FREQT0))
+ 334   2                      {
+ 335   3                              u0timer = 0;
+ 336   3                              if(wBFM > 4)
+ 337   3                              {
+ 338   4                              P3_3=!P3_3;
+ 339   4                                      chtmp = 0;
+ 340   4                                      for (i = 0; i < 5; i++ )
+ 341   4                                      chtmp = chtmp ^ BuferFromModem[i];
+ 342   4                                      chtmp = chtmp | 0x80;
+ 343   4                                      if(chtmp == BuferFromModem[5] && BuferFromModem[0] == (46 | 0x40))
+ 344   4                                      {
+ 345   5                                              tmp = BuferFromModem[1]&~0x80;
+ 346   5                              tmp |= ((int)(BuferFromModem[2]&~0x80)<<7);
+ 347   5                                              if(tmp<=360 && tmp>=0)
+ 348   5                                              {
+ 349   6                                                      A_zad = tmp;
+ 350   6                                                      tmp = BuferFromModem[3]&~0x80;
+ 351   6                                                      tmp |= ((int)(BuferFromModem[4]&~0x80)<<7);
+ 352   6                                                      K = tmp;
+ 353   6                                              }
+ 354   5                                      }
+ 355   4                                      wBFM = 0;
+ 356   4                              }
+ 357   3      
+ 358   3                              BufferInModem[0] = 0x40 | 40;                   
+ 359   3                              OutModem4(LatGnd, 1);
+ 360   3                              OutModem4(LonGnd, 5);
+ 361   3                              OutModem2((int)Angle, 9);
+ 362   3                              OutModem2((int)Vspeed, 11);
+ 363   3                              OutModem2((int)PressureFl, 13);
+ 364   3                      BufferInModem[15] = 0;
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 7   
+
+ 365   3                              for (i = 0; i < 15; i++ )
+ 366   3                              BufferInModem[15] = BufferInModem[15] ^ BufferInModem[i];
+ 367   3                              BufferInModem[15] = 0x80 |      BufferInModem[15];
+ 368   3      
+ 369   3                              BufferInModem[16] = 0x40|41;
+ 370   3                              OutModem2((int)A, 17);
+ 371   3                      BufferInModem[19] = BufferInModem[16] ^ BufferInModem[17] ^ BufferInModem[18] | 0x80;
+ 372   3                              r0 = 0;
+ 373   3                              rk = 20;
+ 374   3                              //dopolnitelnye dannye
+ 375   3                              //A, A_zad, V, V_zad
+ 376   3                              /*tmp = (int)(A*10.);
+ 377   3                              OutModem2(tmp, 20);
+ 378   3                              tmp = (int)(A_zad*10.);
+ 379   3                              OutModem2(tmp, 22);
+ 380   3                              tmp = (int)(V*10.);
+ 381   3                              OutModem2(tmp, 24);
+ 382   3                              tmp = (int)(V_zad*10.);
+ 383   3                              OutModem2(tmp, 26);
+ 384   3                              rk+=8;*/
+ 385   3                              //      
+ 386   3                              flTransmiter = 1;
+ 387   3                              
+ 388   3                              SFRPAGE = 0x00;
+ 389   3                              TI0 = 1;
+ 390   3                      }
+ 391   2              }
+ 392   1      }
+*** WARNING C280 IN LINE 106 OF SERVO7.C: 'Aint': unreferenced local variable
+*** WARNING C280 IN LINE 107 OF SERVO7.C: 'Bfloat': unreferenced local variable
+*** WARNING C280 IN LINE 108 OF SERVO7.C: 'tmpLong': unreferenced local variable
+ 393          //------------------------------------------------------------------------------------
+ 394          void INT0 (void) interrupt 0 //skorost vetra
+ 395          {
+ 396   1              EX0 =   0;
+ 397   1              VeterFlag = 1;
+ 398   1              TV = RTC - RTCV;
+ 399   1              RTCV = RTC;
+ 400   1              return;
+ 401   1      }
+ 402          
+ 403          //------------------------------------------------------------------------------------
+ 404          void TIMER_ISR0 (void) interrupt 1
+ 405          {
+ 406   1              xdata float tmp;
+ 407   1              xdata unsigned char shim;
+ 408   1      
+ 409   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 410   1              SFRPAGE = TIMER01_PAGE;
+ 411   1              RTC++;
+ 412   1              u0timer++;
+ 413   1              
+ 414   1              LData = 0;
+ 415   1              EA = 0; //опрос ЛИР
+ 416   1              
+ 417   1              LIR_SCK = 1;    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 418   1              LIR_SCK = 0;    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 419   1                              
+ 420   1      /*      LIR_SCK = 1;    //---D n-1
+ 421   1              shim++;
+ 422   1              LIR_SCK = 0;
+ 423   1              shim++;
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 8   
+
+ 424   1      */                      
+ 425   1              LIR_SCK = 1;                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 426   1              LIR_SCK = 0;                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++; 
+ 427   1              LData = LData | LIR_DATA;       
+ 428   1      
+ 429   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 430   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 431   1              LData = (LData << 1) | LIR_DATA;        
+ 432   1              
+ 433   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 434   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 435   1              LData = (LData << 1) | LIR_DATA;        
+ 436   1      
+ 437   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 438   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 439   1              LData = (LData << 1) | LIR_DATA;        
+ 440   1              
+ 441   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 442   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 443   1              LData = (LData << 1) | LIR_DATA;        
+ 444   1      
+ 445   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 446   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 447   1              LData = (LData << 1) | LIR_DATA;        
+ 448   1      
+ 449   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 450   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 451   1              LData = (LData << 1) | LIR_DATA;        
+ 452   1      
+ 453   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 454   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 455   1              LData = (LData << 1) | LIR_DATA;        
+ 456   1      
+ 457   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 458   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 459   1              LData = (LData << 1) | LIR_DATA;        
+ 460   1      
+ 461   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 462   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 463   1              LData = (LData << 1) | LIR_DATA;        
+ 464   1      
+ 465   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 466   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 467   1              LData = (LData << 1) | LIR_DATA;        
+ 468   1      
+ 469   1              LIR_SCK = 1;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 470   1              LIR_SCK = 0;                                                    shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;shim++;
+ 471   1              LData = (LData << 1) | LIR_DATA;
+ 472   1      
+ 473   1              LIR_SCK = 1; 
+ 474   1              EA = 1;
+ 475   1              
+ 476   1              //управление антеной--------------------------------------------------
+ 477   1              tmp = 360.0/4095.0*LData;
+ 478   1              if ((A > 270) && (tmp < 90))
+ 479   1              {
+ 480   2                      A = A+(tmp+360-A)/FREQT0*K;
+ 481   2                      if (A > 360)
+ 482   2                              A = A-360;
+ 483   2              }
+ 484   1              else if ((tmp > 270) && (A < 90))
+ 485   1              {
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 9   
+
+ 486   2                      A = A+(tmp-A-360)/FREQT0*K;
+ 487   2                      if (A < 0)
+ 488   2                              A = A+360;
+ 489   2              }
+ 490   1              else
+ 491   1                      A = A+(tmp-A)/FREQT0*K;
+ 492   1      
+ 493   1              V = V+((A-A_pr)*FREQT0-V)/FREQT0*K;
+ 494   1              A_pr = A;
+ 495   1              u = u+((V-V_pr)*FREQT0-u)/FREQT0*K;
+ 496   1              V_pr = V;
+ 497   1      
+ 498   1              //---------------------------------------------
+ 499   1              tmp = (A_zad-A)*10;///UgolMaxV*Vmax;
+ 500   1              V_zad = V_zad+(tmp-V_zad)/FREQT0*K; //-360 ... +360гр
+ 501   1              u_zad = u_zad+((V_zad-V_zad_pr)*FREQT0-u_zad)/FREQT0*K;
+ 502   1              V_zad_pr = V_zad;
+ 503   1      
+ 504   1      //      tmp = (u_zad-u);
+ 505   1              tmp = u_zad;
+ 506   1              while (tmp > 180)
+ 507   1            tmp -= 360;
+ 508   1              while (tmp < -180)
+ 509   1            tmp += 360;
+ 510   1      
+ 511   1              tau = tmp*0.000001;///Vmax*taumax;
+ 512   1              if (tau > taumax)
+ 513   1                      tau = taumax;
+ 514   1              else if (tau < -taumax)
+ 515   1                      tau = -taumax;
+ 516   1              
+ 517   1      
+ 518   1      /*
+ 519   1              tmp = 360.0/4095.0*LData;
+ 520   1              if ((A > 270) && (tmp < 90))
+ 521   1              {
+ 522   1                      A = A+(tmp+360-A)/FREQT0*(K*0.1);
+ 523   1                      if (A > 360)
+ 524   1                              A = A-360;
+ 525   1              }
+ 526   1              else if ((tmp > 270) && (A < 90))
+ 527   1              {
+ 528   1                      A = A+(tmp-A-360)/FREQT0*(K*0.1);
+ 529   1                      if (A < 0)
+ 530   1                              A = A+360;
+ 531   1              }
+ 532   1              else
+ 533   1                      A = A+(tmp-A)/FREQT0*(K*0.1);
+ 534   1      
+ 535   1              V = V+((A-A_pr)*FREQT0-V)/FREQT0*(K*0.1);
+ 536   1              A_pr = A;
+ 537   1              u = u+((V-V_pr)*FREQT0-u)/FREQT0*(K*0.1);
+ 538   1              V_pr = V;
+ 539   1      
+ 540   1              //---------------------------------------------
+ 541   1              tmp = (A_zad-A)/UgolMaxV*Vmax;
+ 542   1              if(tmp > Vmax)  
+ 543   1                      tmp = Vmax;
+ 544   1              else if(tmp < -Vmax)    
+ 545   1                      tmp = -Vmax;
+ 546   1              V_zad = V_zad+(tmp-V_zad)/FREQT0*(K*0.1); //-360 ... +360гр
+ 547   1              u_zad = u_zad+((V_zad-V_zad_pr)*FREQT0-u_zad)/FREQT0*(K*0.1);
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 10  
+
+ 548   1              if(u_zad> Umax) 
+ 549   1                      u_zad = Umax;
+ 550   1              else if(u_zad < -Umax)  
+ 551   1                      u_zad = -Umax;
+ 552   1              V_zad_pr = V_zad;
+ 553   1      
+ 554   1              
+ 555   1              tau = (u_zad-u)/Umax*taumax;
+ 556   1              tmp = (V_zad-V)/Vmax*taumax;
+ 557   1              if(tau>tmp)
+ 558   1                      tau = tmp;
+ 559   1      
+ 560   1              if (tau > taumax)
+ 561   1                      tau = taumax;
+ 562   1              else if (tau < -taumax)
+ 563   1                      tau = -taumax;
+ 564   1      */
+ 565   1      //**
+ 566   1      //--
+ 567   1      /*      tmp = 360.0/4095.0*LData;
+ 568   1              if ((A > 270) && (tmp < 90))
+ 569   1              {
+ 570   1                      A = A+(tmp+360-A)/FREQT0*K;
+ 571   1                      if (A > 360)
+ 572   1                              A = A-360;
+ 573   1              }
+ 574   1              else if ((tmp > 270) && (A < 90))
+ 575   1              {
+ 576   1                      A = A+(tmp-A-360)/FREQT0*K;
+ 577   1                      if (A < 0)
+ 578   1                              A = A+360;
+ 579   1              }
+ 580   1              else
+ 581   1                      A = A+(tmp-A)/FREQT0*K;
+ 582   1      
+ 583   1              if ((A_pr > 270) && (A < 90))
+ 584   1                      V = V+((A+360-A_pr)*FREQT0-V)/FREQT0*K;
+ 585   1              else if ((A > 270) && (A_pr < 90))
+ 586   1                      V = V+((A-A_pr-360)*FREQT0-V)/FREQT0*K;
+ 587   1              else
+ 588   1                      V = V+((A-A_pr)*FREQT0-V)/FREQT0*K;
+ 589   1              A_pr = A;
+ 590   1      
+ 591   1              if (V > Vmax) 
+ 592   1                      V = Vmax;
+ 593   1              else if (V < -Vmax) 
+ 594   1                      V = -Vmax;
+ 595   1      
+ 596   1              V_zad = (A_zad-A);
+ 597   1              while (V_zad > 180)
+ 598   1            V_zad -= 360;
+ 599   1              while (V_zad < -180)
+ 600   1            V_zad += 360;
+ 601   1      
+ 602   1              V_zad = V_zad/UgolMaxV*Vmax;    
+ 603   1              if(V_zad > Vmax)        
+ 604   1                      V_zad = Vmax;
+ 605   1              else if(V_zad < -Vmax)  
+ 606   1                      V_zad = -Vmax;
+ 607   1      
+ 608   1              tau = (V_zad-V)/Vmax*taumax;
+ 609   1              if (tau > taumax)
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 11  
+
+ 610   1                      tau = taumax;
+ 611   1              else if (tau < -taumax)
+ 612   1                      tau = -taumax;*/
+ 613   1      //--
+ 614   1              shim = 0xff-0x3f*fabs(tau)/taumax;
+ 615   1              PCA0CN    = 0x40;
+ 616   1         PCA0MD    = 0x01;
+ 617   1              PCA0CPM0  = 0x43;
+ 618   1         PCA0CPM1  = 0x43;
+ 619   1              if (tau > 0.000002)
+ 620   1              {
+ 621   2                      PCA0CPH0  = 0xFF;
+ 622   2              PCA0CPH1  = shim;
+ 623   2              }
+ 624   1              else if(tau < -0.000002)
+ 625   1              {
+ 626   2                 PCA0CPH0  = shim;
+ 627   2              PCA0CPH1  = 0xFF;
+ 628   2              }
+ 629   1              else
+ 630   1              {
+ 631   2                 PCA0CPH0  = 0xFF;
+ 632   2              PCA0CPH1  = 0xFF;
+ 633   2              }
+ 634   1              if(WSpeed != 0)
+ 635   1                      EX0 = 1;
+ 636   1      
+ 637   1              if(WAngle != 0)
+ 638   1                      EX1 = 1;
+ 639   1      
+ 640   1              SFRPAGE = SFRPAGE_SAVE;
+ 641   1              return;
+ 642   1      }
+ 643          
+ 644          //------------------------------------------------------------------------------------
+ 645          void INT1 (void) interrupt 2 //napravl vetra
+ 646          {
+ 647   1              EX1=0;
+ 648   1              TA = RTC - RTCA;
+ 649   1              RTCA = RTC;
+ 650   1              return;
+ 651   1      }
+ 652          
+ 653          //------------------------------------------------------------------------------------
+ 654          void COM_UART0_isr(void) interrupt 4
+ 655          {
+ 656   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 657   1              SFRPAGE = UART0_PAGE;
+ 658   1              
+ 659   1              if (RI0)
+ 660   1              {
+ 661   2                      BuferFromModem [wBFM++] = SBUF0;  // read character
+ 662   2                      if(wBFM >= NBFM)
+ 663   2                      {
+ 664   3                      wBFM = 0;
+ 665   3                              marBFM = 1;
+ 666   3                      }
+ 667   2                      RI0 = 0;
+ 668   2              }
+ 669   1              if (TI0)
+ 670   1              {
+ 671   2                      if(r0 < rk)
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 12  
+
+ 672   2                      {
+ 673   3                              SBUF0 = BufferInModem[r0++];
+ 674   3                      }
+ 675   2                      else
+ 676   2                      {
+ 677   3                              flTransmiter = 0;
+ 678   3                      }
+ 679   2                      TI0 = 0;
+ 680   2              }
+ 681   1              
+ 682   1              SFRPAGE = SFRPAGE_SAVE;
+ 683   1              return;
+ 684   1      }
+ 685          
+ 686          //-------------------------------------------------------------------
+ 687          
+ 688          void PCA_isr (void)interrupt 9 
+ 689          {
+ 690   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 691   1              SFRPAGE = PCA0_PAGE;
+ 692   1              CF = 0;                                                                                 //Сброс флага прерывания шимогенератора
+ 693   1              SFRPAGE = SFRPAGE_SAVE;
+ 694   1              return;
+ 695   1      }
+ 696          //-------------------------------------------------------------------
+ 697          
+ 698          void ADC0_ISR (void) interrupt 15
+ 699          {
+ 700   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 701   1              SFRPAGE = ADC0_PAGE;
+ 702   1              AD0INT = 0;                         // Clear ADC conversion complete
+ 703   1                                             // indicator
+ 704   1         accumulator += ADC0;                // Read ADC value and add to running
+ 705   1                                             // total
+ 706   1         int_dec--;                          // Update decimation counter
+ 707   1      
+ 708   1         if (int_dec == 0)                   // If zero, then post result
+ 709   1         {
+ 710   2                      int_dec = 256;                          // Reset counter
+ 711   2            Result = accumulator >> 8;
+ 712   2            accumulator = 0L;                // Reset accumulator
+ 713   2                      DavlFlag = 1;
+ 714   2                      EIP2  &= ~0x02;
+ 715   2         }
+ 716   1              SFRPAGE = SFRPAGE_SAVE;
+ 717   1              return;
+ 718   1      }
+ 719          //-------------------------------------------------------------------
+ 720          void GPS_UART1_isr(void) interrupt 20
+ 721          {
+ 722   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 723   1              SFRPAGE = UART1_PAGE;
+ 724   1              if (RI1)
+ 725   1              {
+ 726   2                      flNewGPS = 1;
+ 727   2                      mess [w++] = SBUF1;  // read character
+ 728   2                      if(w >= NS)
+ 729   2                      {
+ 730   3                      w = 0;
+ 731   3                              mar = 1;
+ 732   3                      }
+ 733   2                      RI1 = 0;
+C51 COMPILER V9.00   SERVO7                                                                11/17/2012 10:28:48 PAGE 13  
+
+ 734   2              }
+ 735   1              if (TI1)
+ 736   1              {
+ 737   2                              
+ 738   2              }
+ 739   1              SFRPAGE = SFRPAGE_SAVE;
+ 740   1              return;
+ 741   1      }
+ 742          
+ 743          
+ 744          //#endif
+ 745          
+ 746          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   5916    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =    306      35
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      17
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      4       2
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  3 WARNING(S),  0 ERROR(S)

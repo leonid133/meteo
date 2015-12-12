@@ -1,0 +1,1051 @@
+#include "c8051f120.h"
+#include "init.h"
+#include "comport.h"
+#include <intrins.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "servo.h"                     
+
+#define SYSCLK 24500000 //Hz
+#define FREQT0 8006 //Hz
+
+//отладочные
+sbit LED = P1^6;
+sbit LED2 = P2^6;
+sbit BUTTON = P3^7;
+xdata unsigned char InitFlag;
+//--------------
+//лир
+sbit LIR_DATA = P2^0;
+sbit LIR_SCK = P2^1;
+
+xdata unsigned char F;
+xdata unsigned int delta, LirData, LirTarget, Fdelta;
+
+typedef union INT {                   
+   unsigned int i;
+   unsigned char b[2];
+} INT;
+//---
+//ветер
+sbit WSpeed = P1^1;
+sbit WAngle = P1^3;
+
+xdata float Vspeed, Angle;
+xdata unsigned long RTC, RTCV, RTCA;
+xdata unsigned long TV,TA;
+
+typedef union FLOAT {                   
+   float f;
+   unsigned char b[4];
+} FLOAT;
+//-----
+//UART0
+#define NBFM 		50
+xdata unsigned char BuferFromModem [NBFM]; 
+xdata unsigned char wBFM, rBFM, marBFM, u0timer;
+
+#define SIZE_BUFFER0 		50
+xdata char BufferInModem[SIZE_BUFFER0]; // Для отправки в последовательный порт
+xdata int r0, rk;
+bit flTransmiter;	
+
+//SMBus
+xdata unsigned int Humidity, Temperature;
+
+//GPS
+#define NS 	75
+xdata char mess [NS], r, w, mar;		// Для анализа посылки GPS
+bit flNewGPS;
+xdata unsigned int Vz, koors, flNoKoord, liTimer_tick_GPS, liTimer_tick;
+xdata unsigned long LatFly, LonFly;
+//------------------------------------------------------------------------------
+void OutModem1(unsigned char Data, char i)
+{
+	BufferInModem[i] = Data | 0x80;
+}
+
+//------------------------------------------------------------------------------
+void OutModem2(unsigned int Data, char i)
+{
+	BufferInModem[i] = (Data & 0x007f)| 0x80;
+	BufferInModem[i+1] = ((Data & 0x3f80) >> 7)| 0x80;
+}
+
+//------------------------------------------------------------------------------
+void OutModem4(unsigned long int Data, char i)
+{
+	BufferInModem[i] = (Data & 0x0000007f)| 0x80;
+	BufferInModem[i+1] = ((Data & 0x3f80) >> 7) | 0x80;
+	BufferInModem[i+2] = ((Data & 0x1fc000) >> 14) | 0x80;
+   BufferInModem[i+3] = ((Data & 0xfe00000)>> 21) | 0x80;
+}
+//------------------------------------------------------------------------------------------
+void LirQ(void)
+{
+		//Опрос ЛИР----------------------------
+		EA=0;
+		LirData = 0x0000;
+		//---init
+		LIR_SCK = 1;
+		LIR_SCK = 0;
+		//---D n-1
+		LIR_SCK = 1;
+		LIR_SCK = 0;
+		//---D n-1
+		LIR_SCK = 1;
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (11));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (10));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (9));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (8));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (7));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (6));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (5));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (4));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (3));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (2));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (1));
+		}
+		LIR_SCK = 1; 
+		LIR_SCK = 0;
+		if(LIR_DATA!=0) 
+		{
+			LirData = LirData | (0x1 << (0));
+		}
+		LIR_SCK = 1; 
+		EA=1;
+}
+//------------------------------------------------------------------------------------------
+
+void main(void)
+{
+	//LIR------
+//	xdata unsigned char FdKoeff;
+	//---------
+	xdata unsigned int i;
+  	INT Aint;
+	FLOAT Bfloat;
+	//UART----------
+   xdata char RK_code[26], nByte = 0, KontrSumma = 0, PWM;
+	unsigned int Value;
+	//--------------
+   bit ValidGPS, flPoint; 	
+	xdata unsigned char i_comma, tmpGPS[6], nLetter = 7;
+	xdata unsigned long temp_koord;
+
+	Init_Device();
+
+	LirTarget = 0x03ff;
+	Fdelta = 0;
+	flNewGPS = 0;
+	LED = 0;
+   while(1)
+	{
+//расчет скорости ветра и угла--------------------------------------------------------------
+		Vspeed = (float)FREQT0/((float)TV*0.75);
+		Angle = 360. - (360.*(float)TV/(float)TA);
+//управление антеной------------------------------------------------------------------------
+		PCA0CPH0  = 0xFF;
+		PCA0CPH1  = 0xFF;
+		if(F==0x02)
+		{
+			LirQ();
+			delta = (LirTarget - LirData);	
+			if(delta > 0xF000)
+				delta = delta - 0xF000;
+			if(delta >= 0x07FF)
+			{
+				delta = 0x0FFF - delta;
+				if(delta < 0x0155)
+				{
+					F = 0xC1;
+					if(delta < 0x20 && delta > 0x0B)
+					{
+						F = 0xC1;
+					}
+					else if(delta <= 0x0B)
+					{
+						F = 0x03; 
+					}
+				}
+				else
+				{
+					F=0xA1;
+				}
+			}
+			else if(delta < 0x07FF)
+			{
+				if(delta < 0x0155)
+				{
+					F = 0xC2;
+					if(delta < 0x20 && delta > 0x0B)
+					{
+						F = 0xC2;
+					} 
+					else if(delta <= 0x0B)
+					{
+						F = 0x03; 
+					}
+				}
+				else
+				{
+					F=0xA2;
+				}
+			}
+		}
+		if(LirData==0x0FFF)//при отключенном лир, воздействие отсутствует
+		{
+			F=0x03;
+		}
+//ШИМы на машинку--------------------------
+		if(F==0xA1)
+		{
+			PCA0CPM1  = 0x40;
+			PCA0CPH1  = 0xFF;
+			Fdelta =  delta - Fdelta;
+			Fdelta = delta;
+			PCA0CPM0  = 0x42;
+			PCA0CPH0  = 0xC0;
+		}
+		else if(F==0xA2)
+		{
+			PCA0CPM0  = 0x40;
+			PCA0CPH0  = 0xFF;
+			Fdelta =  delta - Fdelta;
+			Fdelta = delta;
+			PCA0CPM1  = 0x42;
+			PCA0CPH1  = 0xC0;
+		}
+		else if(F==0xC1)
+		{
+			PCA0CPM1  = 0x40;
+			PCA0CPH1  = 0xFF;
+			Fdelta = delta-Fdelta;
+			if(Fdelta>0x0002)
+			{
+				PCA0CPM0  = 0x40;
+				PCA0CPH0  = 0xFF;
+			}
+			else
+			{
+				PCA0CPM0  = 0x42;
+				PCA0CPH0  = 0xC0;
+			}
+			Fdelta = delta;
+		}
+		else if(F==0xC2)
+		{
+			PCA0CPM0  = 0x40;
+			PCA0CPH0  = 0xFF;
+			Fdelta =  delta - Fdelta;
+			if(Fdelta>0x0002)
+			{
+				PCA0CPM1  = 0x40;
+				PCA0CPH1  = 0xFF;
+			}
+			else
+			{
+				PCA0CPM1  = 0x42;
+				PCA0CPH1  = 0xC0;
+			}
+			Fdelta = delta;
+		}  
+		if(F==0x03)
+		{
+ 	      PCA0CPM0  = 0x40;
+ 	      PCA0CPM1  = 0x40;
+		   PCA0CPH0  = 0xFF;
+	   	PCA0CPH1  = 0xFF;
+		}
+		F=0x02;
+//Опрос GPS---------------------------------------------------------------------------
+
+	if(flNewGPS)	
+	{
+		flNewGPS = 0;
+		//Расшифровка посылки GPS
+		if (r < w+mar*NS) 
+		{
+			if(mess[r] == '$')
+			{
+            nLetter = 0;
+			}
+         else if ((nLetter == 0) && (mess[r] == 'G'))
+            nLetter++;
+         else if ((nLetter == 1) && (mess[r] == 'P'))
+            nLetter++;
+         else if ((nLetter == 2) && (mess[r] == 'R'))
+            nLetter++;
+         else if ((nLetter == 3) && (mess[r] == 'M'))
+            nLetter++;
+         else if ((nLetter == 4) && (mess[r] == 'C'))
+         {
+            nLetter++;
+				i_comma = 0;
+				ValidGPS = 0;
+         } 
+		   else if(mess[r] == ',')
+			{
+				i_comma++;
+				i = 0;
+				flPoint = 0;
+			}
+		   else if(i_comma == 2)
+			{
+				if(mess[r] == 'A') 
+					ValidGPS = 1;
+				else
+				{
+					ValidGPS = 0;
+//					flNoKoord = 1;
+//					liTimer_tick_GPS = liTimer_tick;
+				}
+			}
+         else if (ValidGPS)
+			{
+				
+				if (i_comma == 3)                			//Latitude
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+						i = 0;
+					}
+					else if (flPoint == 0)						//Целая часть
+					{
+						tmpGPS[i++] = mess[r];
+						if(i == 2)
+						{
+		      		   tmpGPS[i] = 0;
+							temp_koord = atoi(tmpGPS);
+   			      	temp_koord = 60UL*10000*temp_koord;
+						}	
+						else if(i == 4)
+						{
+							tmpGPS[0] = tmpGPS[1] = '0';
+			      	   tmpGPS[i] = 0;
+   				      temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+						}	
+					}
+					else												//Дробная часть
+					{
+						tmpGPS[i++] = mess[r];
+	      		   tmpGPS[i] = 0;
+					}
+				}
+				else if (i_comma == 4)
+				{
+		      	temp_koord = temp_koord+atoi(tmpGPS);
+//-----------
+//lLatFly = 55UL*60*10000+50UL*10000+8680;
+//--------
+					if (mess[r] == 'S')   						//знак Latitude
+						LatFly = 54000000UL-temp_koord;		//90UL*60*10000-koord;
+					else		  
+						LatFly = 54000000UL+temp_koord;		//90UL*60*10000+koord;
+				}
+				else if (i_comma == 5)                		//Longitude
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+						i = 0;
+					}
+					else if (flPoint == 0)						//Целая часть
+					{
+						tmpGPS[i++] = mess[r];
+						if(i == 3)
+						{
+		      		   tmpGPS[i] = 0;
+   			      	temp_koord = atoi(tmpGPS);
+   			      	temp_koord = 60UL*10000*temp_koord;
+						}	
+						else if(i == 5)
+						{
+							tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+			      	   tmpGPS[i] = 0;
+   				      temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+						}	
+					}
+					else												//Дробная часть
+					{
+						tmpGPS[i++] = mess[r];
+	      		   tmpGPS[i] = 0;
+					}
+				}
+				else if (i_comma == 6)
+				{
+		      	temp_koord = temp_koord+atoi(tmpGPS);
+//----------------
+//lLonFly = 49UL*60*10000+6UL*10000+3760;
+//----------------
+					if (mess[r] == 'W')   						//знак Longitude
+						LonFly = 108000000UL-temp_koord;		//180UL*60*10000-koord;
+					else       
+						LonFly = temp_koord+108000000UL;		//180UL*60*10000;
+				}
+				else if (i_comma == 7)							//скорость в узлах
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+   		      	Vz = 1.852*atoi(tmpGPS)/3.6;   		//Преобразовать из узлов в м/с
+//---------
+//Vz = 20;
+//-----------
+					}
+					else if(flPoint == 0)
+					{
+						tmpGPS[i++] = mess[r];
+	      	   	tmpGPS[i] = 0;
+					}
+            }
+				else if (i_comma == 8)							//курс в градусах
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+   		      	koors = atoi(tmpGPS);
+                  if (koors < 0)
+                     koors = 360+koors;
+
+						flNoKoord = 0;
+						flNewGPS = 1;
+						liTimer_tick_GPS = liTimer_tick;	
+//		            OutModem20();
+//-----------						   
+//koors = 30;
+//-----------
+					}
+					else if(flPoint == 0)
+					{
+						tmpGPS[i++] = mess[r];
+	      	   	tmpGPS[i] = 0;
+					}
+            }
+			}
+			r++;
+	   	if(r >= NS)
+			{
+   	   	r = 0;
+				mar = 0;	
+			}      
+		}
+	}
+	
+//Опрос SMBus-------------------------------------------------------------------------
+//sfr SMB0CN   = 0xC0;    /* SMBUS 0 CONTROL                              */
+//sfr SMB0STA  = 0xC1;    /* SMBUS 0 STATUS                               */
+//sfr SMB0DAT  = 0xC2;    /* SMBUS 0 DATA                                 */
+//sfr SMB0ADR  = 0xC3;    /* SMBUS 0 SLAVE ADDRESS                        */
+//sfr SMB0CR   = 0xCF;    /* SMBUS 0 CLOCK RATE                           */
+/* SMB0CN 0xC0 */
+//sbit BUSY   = SMB0CN ^ 7;           /* SMBUS 0 BUSY                    */
+//sbit ENSMB  = SMB0CN ^ 6;           /* SMBUS 0 ENABLE                  */
+//sbit STA    = SMB0CN ^ 5;           /* SMBUS 0 START FLAG              */
+//sbit STO    = SMB0CN ^ 4;           /* SMBUS 0 STOP FLAG               */
+//sbit SI     = SMB0CN ^ 3;           /* SMBUS 0 INTERRUPT PENDING FLAG  */
+//sbit AA     = SMB0CN ^ 2;           /* SMBUS 0 ASSERT/ACKNOWLEDGE FLAG */
+//sbit SMBFTE = SMB0CN ^ 1;           /* SMBUS 0 FREE TIMER ENABLE       */
+//sbit SMBTOE = SMB0CN ^ 0;           /* SMBUS 0 TIMEOUT ENABLE          */
+//#define  SMB0_PAGE         0x00     /* SMBUS 0                            */
+
+if(u0timer>0xf0)
+{
+	LED=!LED;
+	SFRPAGE   = SMB0_PAGE;
+	ENSMB = 1;
+	
+	SMB0ADR = 000;
+	STA = 1;
+	SMB0DAT = 0x03;
+		Temperature = SMB0DAT;
+	STO = 1;
+
+	STA = 1;
+	SMB0DAT = 0x05;
+		Humidity = SMB0DAT;
+	STO = 1;
+	
+	ENSMB = 0;
+}
+
+//Работа с COM портом-----------------------------------------------------------------
+
+if(u0timer>0xf0)
+{
+	u0timer = 0;
+//	ES0=1;
+	if(wBFM > 4)
+	{
+		if(BuferFromModem [wBFM-1]==0x41)
+		{
+			if(BuferFromModem [wBFM-4]==0x40)
+			{
+				Aint.b[0] = BuferFromModem[wBFM-3];
+				Aint.b[1] = BuferFromModem[wBFM-2];
+				if(Aint.i<=0x0fff)
+				{
+					LirTarget = Aint.i;
+				}
+			}	
+		}
+		wBFM = 0;
+	}
+		//	TI0 = 1; //Read redy UART0
+		//Write to UART0--------------------------------------
+		Aint.i = LirData;
+		BufferInModem[0] = 0x40+1;
+		BufferInModem[1] = Aint.b[0];		
+		BufferInModem[2] = Aint.b[1];
+		Bfloat.f= Vspeed; 
+		BufferInModem[3] = Bfloat.b[0];
+		BufferInModem[4] = Bfloat.b[1];
+		BufferInModem[5] = Bfloat.b[2];
+		BufferInModem[6] = Bfloat.b[3];
+		Bfloat.f= Angle;
+		BufferInModem[7] = Bfloat.b[0];
+		BufferInModem[8] = Bfloat.b[1];
+		BufferInModem[9] = Bfloat.b[2];
+		BufferInModem[10] = Bfloat.b[3];
+		BufferInModem[11] = 0x40;
+
+         	BufferInModem[12] = 0;
+         	for (i = 0; i < 12; i++ )
+	         	BufferInModem[12] = BufferInModem[12] ^ BufferInModem[i];
+     	   	BufferInModem[12] = 0x80 | BufferInModem[12];
+
+		flTransmiter = 1;
+	
+   	r0 = 0;
+   	rk = 13;
+		SFRPAGE = 0x00;
+
+		while (flTransmiter)
+		{
+			if(r0 < rk)
+			{
+				flTransmiter = 1;
+				SBUF0 = BufferInModem[r0++];
+			}
+			else
+			{
+				flTransmiter = 0;
+			}
+		}
+//		ES0=0;
+}
+	//------------------------------------------------------------
+	}
+/*
+//UART----------------------------
+	rBFM = wBFM = marBFM = 0;
+	for(PWM = 1; PWM < 15; PWM++)
+	{
+		Value = 37500;
+		write(PWM+112, Value);
+	}
+
+	while(1)
+	{
+   	if(rBFM < wBFM+marBFM*NBFM)
+   	{
+			if ((BuferFromModem[rBFM] & 0xC0) == 0x40)
+			{
+				nByte = 0;
+				KontrSumma = 0;
+				PWM = BuferFromModem[rBFM] & 0x3f;
+			}
+			if (nByte > 25)
+				nByte = 25;
+			RK_code[nByte] = BuferFromModem[rBFM] & 0x7f;
+			KontrSumma = KontrSumma^RK_code[nByte++];
+
+			if ( (nByte == 5) && (KontrSumma == 0) )
+			{
+				Value = RK_code[1]+((unsigned int)RK_code[2] << 7)+((unsigned int)RK_code[3] << 14);
+				write(PWM+112, Value);
+			}
+
+         rBFM++;
+			if(rBFM >= NBFM)
+			{
+   			rBFM = 0;
+				marBFM = 0;
+			}
+      }
+				//-----------------------------------------------------------------------------------
+		if(flNewGPS)	
+		{
+			flNewGPS = 0;
+         OutModem20();
+
+			if (RegimeKren == 0 || RegimeStart == 0) //не ручное управление
+				break; 
+start1:
+			dz = LonMar[n_];
+			dz = 0.1856*(dz - LonFly)*cos_Lat0;
+		   dx = LatMar[n_];
+		   dx = 0.1856*(dx-LatFly);
+
+//		  	if(RegimeKren)//автономный полет
+//			{
+	   		dz_pr = LonMar[n_-1];
+			   dz_pr = 0.1856*(dz_pr-LonFly)*cos_Lat0;
+   			dx_pr = LatMar[n_-1];
+		   	dx_pr = 0.1856*(dx_pr-LatFly);
+
+			   tmp =sqrt(dz*dz+dx*dx);		//tmp = rasst_toch_mar
+   			if ((EPSILON > tmp) && (n_ != i_mar) && (n_ != 0))
+			   {
+      			if ((n_ == i_mar-2) && (fabs(H_dat-100) > 50))
+         			;
+      			else
+      			{
+         			n_++;
+         			flCommand = 1;
+
+         			if (RegimeV == 2)
+               		Vz_zad = Vz_Mar[n_];
+         			if (RegimeVy == 2)
+               		H_zad_buf = H_Mar[n_];
+         			goto start1;
+      			}
+//   			}
+
+        	   if ( (fabs(dx-dx_pr) <= FLT_EPSILON) && (fabs(dz-dz_pr) <= FLT_EPSILON) )
+  		      	napr_vetv_mar = 0;
+        	  	else
+  		      	napr_vetv_mar = atan2(dz-dz_pr, dx-dx_pr);
+
+      		if ( (fabs(dx) <= FLT_EPSILON) && (fabs(dz) <= FLT_EPSILON) )
+		      	angle = 0;
+      		else
+		      	angle = atan2(dz, dx);	//napr_toch_mar = atan2(dz, dx),
+      		angle = angle-napr_vetv_mar;
+
+			   otkl_ot_mar = tmp*sin(angle);
+				if (fabs(otkl_ot_mar) > 500) tmp = 200;	//tmp = l_km
+				else                         tmp = 500;
+			   dz = otkl_ot_mar*cos(napr_vetv_mar)+tmp*sin(napr_vetv_mar);	//dz = z_toch_pricel
+   			dx = -otkl_ot_mar*sin(napr_vetv_mar)+tmp*cos(napr_vetv_mar);	//dx = x_toch_pricel
+			}
+			tmp = koors;
+			tmp =  -tmp/ToGrad;
+    		if ( (fabs(dx) > FLT_EPSILON) && (fabs(dz) > FLT_EPSILON) )
+				tmp =  tmp + atan2(dz, dx);
+
+		   while (tmp > M_PI)
+      		tmp -= D_PI;
+		   while (tmp < -M_PI)
+      		tmp += D_PI;
+
+		   tmp = ToGrad*tmp;		
+			if(tmp > 42)
+				tmp = 42;
+		   else if(tmp < -42)
+				tmp = -42;
+			kren_zad_buf = tmp;
+		}
+      else if (liTimer_tick-liTimer_tick_GPS > 2*FREQ) //Отсутствие координат
+		{
+			flNoKoord = 1;
+			liTimer_tick_GPS = liTimer_tick;	
+         OutModem20();
+		}
+
+		//Расшифровка посылки GPS
+		if (r < w+mar*NS) 
+		{
+			if(mess[r] == '$')
+			{
+            nLetter = 0;
+			}
+         else if ((nLetter == 0) && (mess[r] == 'G'))
+            nLetter++;
+         else if ((nLetter == 1) && (mess[r] == 'P'))
+            nLetter++;
+         else if ((nLetter == 2) && (mess[r] == 'R'))
+            nLetter++;
+         else if ((nLetter == 3) && (mess[r] == 'M'))
+            nLetter++;
+         else if ((nLetter == 4) && (mess[r] == 'C'))
+         {
+            nLetter++;
+				i_comma = 0;
+				ValidGPS = 0;
+         } 
+		   else if(mess[r] == ',')
+			{
+				i_comma++;
+				i = 0;
+				flPoint = 0;
+			}
+		   else if(i_comma == 2)
+			{
+				if(mess[r] == 'A') 
+					ValidGPS = 1;
+				else
+				{
+					ValidGPS = 0;
+//					flNoKoord = 1;
+//					liTimer_tick_GPS = liTimer_tick;
+				}
+			}
+         else if (ValidGPS)
+			{
+				if (i_comma == 3)                //Latitude
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+						i = 0;
+					}
+					else if (flPoint == 0)			//Целая часть
+					{
+						tmpGPS[i++] = mess[r];
+						if(i == 2)
+						{
+		      		   tmpGPS[i] = 0;
+							temp_koord = atoi(tmpGPS);
+   			      	temp_koord = 60UL*10000*temp_koord;
+						}	
+						else if(i == 4)
+						{
+							tmpGPS[0] = tmpGPS[1] = '0';
+			      	   tmpGPS[i] = 0;
+   				      temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+						}	
+					}
+					else					//Дробная часть
+					{
+						tmpGPS[i++] = mess[r];
+	      		   tmpGPS[i] = 0;
+					}
+				}
+				else if (i_comma == 4)
+				{
+		      	temp_koord = temp_koord+atoi(tmpGPS);
+//-----------
+//lLatFly = 55UL*60*10000+50UL*10000+8680;
+//--------
+					if (mess[r] == 'S')   				//знак Latitude
+						LatFly = 54000000UL-temp_koord;		//90UL*60*10000-koord;
+					else		  
+						LatFly = 54000000UL+temp_koord;	//90UL*60*10000+koord;
+				}
+				else if (i_comma == 5)                //Longitude
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+						i = 0;
+					}
+					else if (flPoint == 0)			//Целая часть
+					{
+						tmpGPS[i++] = mess[r];
+						if(i == 3)
+						{
+		      		   tmpGPS[i] = 0;
+   			      	temp_koord = atoi(tmpGPS);
+   			      	temp_koord = 60UL*10000*temp_koord;
+						}	
+						else if(i == 5)
+						{
+							tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+			      	   tmpGPS[i] = 0;
+   				      temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+						}	
+					}
+					else					//Дробная часть
+					{
+						tmpGPS[i++] = mess[r];
+	      		   tmpGPS[i] = 0;
+					}
+				}
+				else if (i_comma == 6)
+				{
+		      	temp_koord = temp_koord+atoi(tmpGPS);
+//----------------
+//lLonFly = 49UL*60*10000+6UL*10000+3760;
+//----------------
+					if (mess[r] == 'W')   //знак Longitude
+						LonFly = 108000000UL-temp_koord;		//180UL*60*10000-koord;
+					else       
+						LonFly = temp_koord+108000000UL;	//180UL*60*10000;
+				}
+				else if (i_comma == 7)	//скорость в узлах
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+   		      	Vz = 1.852*atoi(tmpGPS)/3.6;   //??? Преобразовать из узлов в м/с
+//---------
+//Vz = 20;
+//-----------
+					}
+					else if(flPoint == 0)
+					{
+						tmpGPS[i++] = mess[r];
+	      	   	tmpGPS[i] = 0;
+					}
+            }
+				else if (i_comma == 8)	//курс в градусах
+				{
+					if(mess[r] == '.')
+					{
+						flPoint = 1;
+   		      	koors = atoi(tmpGPS);
+                  if (koors < 0)
+                     koors = 360+koors;
+
+						flNoKoord = 0;
+						flNewGPS = 1;
+						liTimer_tick_GPS = liTimer_tick;	
+		            OutModem20();
+//-----------						   
+//koors = 30;
+//-----------
+					}
+					else if(flPoint == 0)
+					{
+						tmpGPS[i++] = mess[r];
+	      	   	tmpGPS[i] = 0;
+					}
+            }
+			}
+			r++;
+	   	if(r >= NS)
+			{
+   	   	r = 0;
+				mar = 0;	
+			}      
+		}
+
+
+	}	
+*/	
+//-----------------
+
+}
+
+//------------------------------------------------------------------------------------------
+//скорость ветра
+void INT0 (void) interrupt 0
+{
+	TV = RTC - RTCV;
+	RTCV = RTC;;
+	EX0=0;
+	return;
+}
+
+//------------------------------------------------------------------------------------
+void TIMER_ISR0 (void) interrupt 1
+{
+	xdata unsigned int i, delta, FdKoeff;
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = TIMER01_PAGE;
+	RTC++;
+//ветер-------------
+	if(WSpeed!=0)
+		EX0=1;
+
+	if(WAngle!=0)
+		EX1=1;
+//-------------------
+	u0timer++; // COM u0
+//	u1timer++; // GPS u1
+//-------------------
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+
+
+
+//направление ветра-------------------------------------------------------------------
+void INT1 (void) interrupt 2
+{
+	TA = RTC - RTCA;
+	RTCA = RTC;
+  	EX1=0;
+	return;
+}
+
+//------------------------------------------------------------------------------------
+void TIMER_ISR1 (void) interrupt 3
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = TIMER01_PAGE;
+	
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+
+//-------------------------------------------------------------------
+void COM_UART0_isr(void) interrupt 4
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	INT Aint;
+	SFRPAGE = UART0_PAGE;
+
+	if (RI0)
+  	{
+		BuferFromModem [wBFM++] = SBUF0;  // read character
+		if(wBFM >= NBFM)
+		{
+     		wBFM = 0;
+			marBFM = 1;
+		}/*
+		if(BuferFromModem [wBFM-1]==0x41)
+		{
+			if(BuferFromModem [wBFM-4]==0x40)
+			{
+				Aint.b[0] = BuferFromModem[wBFM-3];
+				Aint.b[1] = BuferFromModem[wBFM-2];
+				if(Aint.i<=0x0fff)
+				{
+					LirTarget = Aint.i;
+				}
+			}	
+		}*/
+	  	RI0 = 0;
+	}
+	if (TI0)
+	{
+			
+
+  	}
+
+	SFRPAGE = UART1_PAGE;
+	if (RI1)
+  	{
+		flNewGPS = 1;
+		mess [w++] = SBUF1;  // read character
+		if(w >= NS)
+		{
+     		w = 0;
+			mar = 1;
+		}
+		RI1 = 0;
+	}
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+void Timer2_ISR(void) interrupt 5
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = 0x00;
+
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+//------------------------------------------------------------------------------------
+void SMBus_isr(void) interrupt 7
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = SMB0_PAGE;
+
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+
+//------------------------------------------------------------------------------------
+void PCA_isr(void) interrupt 9
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = PCA0_PAGE;
+	xdata char a;
+	a=0;
+
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+//------------------------------------------------------------------------------------
+void TIMER_ISR3 (void) interrupt 14
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = TMR3_PAGE;
+
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+//-------------------------------------------------------------------
+void GPS_UART1_isr(void) interrupt 20
+{
+	xdata char SFRPAGE_SAVE = SFRPAGE;
+	SFRPAGE = UART1_PAGE;
+	if (RI1)
+  	{
+		flNewGPS = 1;
+		mess [w++] = SBUF1;  // read character
+		if(w >= NS)
+		{
+     		w = 0;
+			mar = 1;
+		}
+		RI1 = 0;
+	}
+	if (TI1)
+	{
+			
+  	}
+
+	SFRPAGE = SFRPAGE_SAVE;
+	return;
+}
+//------------------------------------------------------------------------------------------
+//#endif

@@ -1,0 +1,1106 @@
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE SERVO1
+OBJECT MODULE PLACED IN servo1.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.exe servo1.c DB OE BR
+
+line level    source
+
+   1          #include "c8051f120.h"
+   2          #include "init.h"
+   3          #include "comport.h"
+   4          #include <intrins.h>
+   5          #include <ctype.h>
+   6          #include <stdio.h>
+   7          #include <stdlib.h>
+   8          #include "servo.h"                     
+   9          
+  10          #define SYSCLK 24500000 //Hz
+  11          #define FREQT0 8006 //Hz
+  12          
+  13          //отладочные
+  14          sbit LED = P1^6;
+  15          sbit LED2 = P2^6;
+  16          sbit BUTTON = P3^7;
+  17          xdata unsigned char InitFlag;
+  18          //--------------
+  19          //лир
+  20          sbit LIR_DATA = P2^0;
+  21          sbit LIR_SCK = P2^1;
+  22          
+  23          xdata unsigned char F;
+  24          xdata unsigned int delta, LirData, LirTarget, Fdelta;
+  25          
+  26          typedef union INT {                   
+  27             unsigned int i;
+  28             unsigned char b[2];
+  29          } INT;
+  30          //---
+  31          //ветер
+  32          sbit WSpeed = P1^1;
+  33          sbit WAngle = P1^3;
+  34          
+  35          xdata float Vspeed, Angle;
+  36          xdata unsigned long RTC, RTCV, RTCA;
+  37          xdata unsigned long TV,TA;
+  38          
+  39          typedef union FLOAT {                   
+  40             float f;
+  41             unsigned char b[4];
+  42          } FLOAT;
+  43          //-----
+  44          //UART0
+  45          #define NBFM            50
+  46          xdata unsigned char BuferFromModem [NBFM]; 
+  47          xdata unsigned char wBFM, rBFM, marBFM, u0timer;
+  48          
+  49          #define SIZE_BUFFER0            50
+  50          xdata char BufferInModem[SIZE_BUFFER0]; // Для отправки в последовательный порт
+  51          xdata int r0, rk;
+  52          bit flTransmiter;       
+  53          
+  54          //SMBus
+  55          xdata unsigned int Humidity, Temperature;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 2   
+
+  56          
+  57          //GPS
+  58          #define NS      75
+  59          xdata char mess [NS], r, w, mar;                // Для анализа посылки GPS
+  60          bit flNewGPS;
+  61          xdata unsigned int Vz, koors, flNoKoord, liTimer_tick_GPS, liTimer_tick;
+  62          xdata unsigned long LatFly, LonFly;
+  63          //------------------------------------------------------------------------------
+  64          void OutModem1(unsigned char Data, char i)
+  65          {
+  66   1              BufferInModem[i] = Data | 0x80;
+  67   1      }
+  68          
+  69          //------------------------------------------------------------------------------
+  70          void OutModem2(unsigned int Data, char i)
+  71          {
+  72   1              BufferInModem[i] = (Data & 0x007f)| 0x80;
+  73   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7)| 0x80;
+  74   1      }
+  75          
+  76          //------------------------------------------------------------------------------
+  77          void OutModem4(unsigned long int Data, char i)
+  78          {
+  79   1              BufferInModem[i] = (Data & 0x0000007f)| 0x80;
+  80   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7) | 0x80;
+  81   1              BufferInModem[i+2] = ((Data & 0x1fc000) >> 14) | 0x80;
+  82   1         BufferInModem[i+3] = ((Data & 0xfe00000)>> 21) | 0x80;
+  83   1      }
+  84          //------------------------------------------------------------------------------------------
+  85          void LirQ(void)
+  86          {
+  87   1                      //Опрос ЛИР----------------------------
+  88   1                      EA=0;
+  89   1                      LirData = 0x0000;
+  90   1                      //---init
+  91   1                      LIR_SCK = 1;
+  92   1                      LIR_SCK = 0;
+  93   1                      //---D n-1
+  94   1                      LIR_SCK = 1;
+  95   1                      LIR_SCK = 0;
+  96   1                      //---D n-1
+  97   1                      LIR_SCK = 1;
+  98   1                      LIR_SCK = 0;
+  99   1                      if(LIR_DATA!=0) 
+ 100   1                      {
+ 101   2                              LirData = LirData | (0x1 << (11));
+ 102   2                      }
+ 103   1                      LIR_SCK = 1; 
+ 104   1                      LIR_SCK = 0;
+ 105   1                      if(LIR_DATA!=0) 
+ 106   1                      {
+ 107   2                              LirData = LirData | (0x1 << (10));
+ 108   2                      }
+ 109   1                      LIR_SCK = 1; 
+ 110   1                      LIR_SCK = 0;
+ 111   1                      if(LIR_DATA!=0) 
+ 112   1                      {
+ 113   2                              LirData = LirData | (0x1 << (9));
+ 114   2                      }
+ 115   1                      LIR_SCK = 1; 
+ 116   1                      LIR_SCK = 0;
+ 117   1                      if(LIR_DATA!=0) 
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 3   
+
+ 118   1                      {
+ 119   2                              LirData = LirData | (0x1 << (8));
+ 120   2                      }
+ 121   1                      LIR_SCK = 1; 
+ 122   1                      LIR_SCK = 0;
+ 123   1                      if(LIR_DATA!=0) 
+ 124   1                      {
+ 125   2                              LirData = LirData | (0x1 << (7));
+ 126   2                      }
+ 127   1                      LIR_SCK = 1; 
+ 128   1                      LIR_SCK = 0;
+ 129   1                      if(LIR_DATA!=0) 
+ 130   1                      {
+ 131   2                              LirData = LirData | (0x1 << (6));
+ 132   2                      }
+ 133   1                      LIR_SCK = 1; 
+ 134   1                      LIR_SCK = 0;
+ 135   1                      if(LIR_DATA!=0) 
+ 136   1                      {
+ 137   2                              LirData = LirData | (0x1 << (5));
+ 138   2                      }
+ 139   1                      LIR_SCK = 1; 
+ 140   1                      LIR_SCK = 0;
+ 141   1                      if(LIR_DATA!=0) 
+ 142   1                      {
+ 143   2                              LirData = LirData | (0x1 << (4));
+ 144   2                      }
+ 145   1                      LIR_SCK = 1; 
+ 146   1                      LIR_SCK = 0;
+ 147   1                      if(LIR_DATA!=0) 
+ 148   1                      {
+ 149   2                              LirData = LirData | (0x1 << (3));
+ 150   2                      }
+ 151   1                      LIR_SCK = 1; 
+ 152   1                      LIR_SCK = 0;
+ 153   1                      if(LIR_DATA!=0) 
+ 154   1                      {
+ 155   2                              LirData = LirData | (0x1 << (2));
+ 156   2                      }
+ 157   1                      LIR_SCK = 1; 
+ 158   1                      LIR_SCK = 0;
+ 159   1                      if(LIR_DATA!=0) 
+ 160   1                      {
+ 161   2                              LirData = LirData | (0x1 << (1));
+ 162   2                      }
+ 163   1                      LIR_SCK = 1; 
+ 164   1                      LIR_SCK = 0;
+ 165   1                      if(LIR_DATA!=0) 
+ 166   1                      {
+ 167   2                              LirData = LirData | (0x1 << (0));
+ 168   2                      }
+ 169   1                      LIR_SCK = 1; 
+ 170   1                      EA=1;
+ 171   1      }
+ 172          //------------------------------------------------------------------------------------------
+ 173          
+ 174          void main(void)
+ 175          {
+ 176   1              //LIR------
+ 177   1      //      xdata unsigned char FdKoeff;
+ 178   1              //---------
+ 179   1              xdata unsigned int i;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 4   
+
+ 180   1              INT Aint;
+ 181   1              FLOAT Bfloat;
+ 182   1              //UART----------
+ 183   1      //   xdata char RK_code[26], nByte = 0, KontrSumma = 0, PWM;
+ 184   1      //      unsigned int Value;
+ 185   1              //--------------
+ 186   1         bit ValidGPS, flPoint;       
+ 187   1              xdata unsigned char i_comma, tmpGPS[6], nLetter = 7;
+ 188   1              xdata unsigned long temp_koord;
+ 189   1      
+ 190   1              Init_Device();
+ 191   1      
+ 192   1              LirTarget = 0x03ff;
+ 193   1              Fdelta = 0;
+ 194   1              flNewGPS = 0;
+ 195   1              LED = 0;
+ 196   1         while(1)
+ 197   1              {
+ 198   2      //расчет скорости ветра и угла--------------------------------------------------------------
+ 199   2                      Vspeed = (float)FREQT0/((float)TV*0.75);
+ 200   2                      Angle = 360. - (360.*(float)TV/(float)TA);
+ 201   2      //управление антеной------------------------------------------------------------------------
+ 202   2                      PCA0CPH0  = 0xFF;
+ 203   2                      PCA0CPH1  = 0xFF;
+ 204   2                      if(F==0x02)
+ 205   2                      {
+ 206   3                              LirQ();
+ 207   3                              delta = (LirTarget - LirData);  
+ 208   3                              if(delta > 0xF000)
+ 209   3                                      delta = delta - 0xF000;
+ 210   3                              if(delta >= 0x07FF)
+ 211   3                              {
+ 212   4                                      delta = 0x0FFF - delta;
+ 213   4                                      if(delta < 0x0155)
+ 214   4                                      {
+ 215   5                                              F = 0xC1;
+ 216   5                                              if(delta < 0x20 && delta > 0x0B)
+ 217   5                                              {
+ 218   6                                                      F = 0xC1;
+ 219   6                                              }
+ 220   5                                              else if(delta <= 0x0B)
+ 221   5                                              {
+ 222   6                                                      F = 0x03; 
+ 223   6                                              }
+ 224   5                                      }
+ 225   4                                      else
+ 226   4                                      {
+ 227   5                                              F=0xA1;
+ 228   5                                      }
+ 229   4                              }
+ 230   3                              else if(delta < 0x07FF)
+ 231   3                              {
+ 232   4                                      if(delta < 0x0155)
+ 233   4                                      {
+ 234   5                                              F = 0xC2;
+ 235   5                                              if(delta < 0x20 && delta > 0x0B)
+ 236   5                                              {
+ 237   6                                                      F = 0xC2;
+ 238   6                                              } 
+ 239   5                                              else if(delta <= 0x0B)
+ 240   5                                              {
+ 241   6                                                      F = 0x03; 
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 5   
+
+ 242   6                                              }
+ 243   5                                      }
+ 244   4                                      else
+ 245   4                                      {
+ 246   5                                              F=0xA2;
+ 247   5                                      }
+ 248   4                              }
+ 249   3                      }
+ 250   2                      if(LirData==0x0FFF)//при отключенном лир, воздействие отсутствует
+ 251   2                      {
+ 252   3                              F=0x03;
+ 253   3                      }
+ 254   2      //ШИМы на машинку--------------------------
+ 255   2                      if(F==0xA1)
+ 256   2                      {
+ 257   3                              PCA0CPM1  = 0x40;
+ 258   3                              PCA0CPH1  = 0xFF;
+ 259   3                              Fdelta =  delta - Fdelta;
+ 260   3                              Fdelta = delta;
+ 261   3                              PCA0CPM0  = 0x42;
+ 262   3                              PCA0CPH0  = 0xC0;
+ 263   3                      }
+ 264   2                      else if(F==0xA2)
+ 265   2                      {
+ 266   3                              PCA0CPM0  = 0x40;
+ 267   3                              PCA0CPH0  = 0xFF;
+ 268   3                              Fdelta =  delta - Fdelta;
+ 269   3                              Fdelta = delta;
+ 270   3                              PCA0CPM1  = 0x42;
+ 271   3                              PCA0CPH1  = 0xC0;
+ 272   3                      }
+ 273   2                      else if(F==0xC1)
+ 274   2                      {
+ 275   3                              PCA0CPM1  = 0x40;
+ 276   3                              PCA0CPH1  = 0xFF;
+ 277   3                              Fdelta = delta-Fdelta;
+ 278   3                              if(Fdelta>0x0002)
+ 279   3                              {
+ 280   4                                      PCA0CPM0  = 0x40;
+ 281   4                                      PCA0CPH0  = 0xFF;
+ 282   4                              }
+ 283   3                              else
+ 284   3                              {
+ 285   4                                      PCA0CPM0  = 0x42;
+ 286   4                                      PCA0CPH0  = 0xC0;
+ 287   4                              }
+ 288   3                              Fdelta = delta;
+ 289   3                      }
+ 290   2                      else if(F==0xC2)
+ 291   2                      {
+ 292   3                              PCA0CPM0  = 0x40;
+ 293   3                              PCA0CPH0  = 0xFF;
+ 294   3                              Fdelta =  delta - Fdelta;
+ 295   3                              if(Fdelta>0x0002)
+ 296   3                              {
+ 297   4                                      PCA0CPM1  = 0x40;
+ 298   4                                      PCA0CPH1  = 0xFF;
+ 299   4                              }
+ 300   3                              else
+ 301   3                              {
+ 302   4                                      PCA0CPM1  = 0x42;
+ 303   4                                      PCA0CPH1  = 0xC0;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 6   
+
+ 304   4                              }
+ 305   3                              Fdelta = delta;
+ 306   3                      }  
+ 307   2                      if(F==0x03)
+ 308   2                      {
+ 309   3                    PCA0CPM0  = 0x40;
+ 310   3                    PCA0CPM1  = 0x40;
+ 311   3                         PCA0CPH0  = 0xFF;
+ 312   3                      PCA0CPH1  = 0xFF;
+ 313   3                      }
+ 314   2                      F=0x02;
+ 315   2      //Опрос GPS---------------------------------------------------------------------------
+ 316   2      
+ 317   2              if(flNewGPS)    
+ 318   2              {
+ 319   3                      flNewGPS = 0;
+ 320   3                      //Расшифровка посылки GPS
+ 321   3                      if (r < w+mar*NS) 
+ 322   3                      {
+ 323   4                              if(mess[r] == '$')
+ 324   4                              {
+ 325   5                  nLetter = 0;
+ 326   5                              }
+ 327   4               else if ((nLetter == 0) && (mess[r] == 'G'))
+ 328   4                  nLetter++;
+ 329   4               else if ((nLetter == 1) && (mess[r] == 'P'))
+ 330   4                  nLetter++;
+ 331   4               else if ((nLetter == 2) && (mess[r] == 'R'))
+ 332   4                  nLetter++;
+ 333   4               else if ((nLetter == 3) && (mess[r] == 'M'))
+ 334   4                  nLetter++;
+ 335   4               else if ((nLetter == 4) && (mess[r] == 'C'))
+ 336   4               {
+ 337   5                  nLetter++;
+ 338   5                                      i_comma = 0;
+ 339   5                                      ValidGPS = 0;
+ 340   5               } 
+ 341   4                         else if(mess[r] == ',')
+ 342   4                              {
+ 343   5                                      i_comma++;
+ 344   5                                      i = 0;
+ 345   5                                      flPoint = 0;
+ 346   5                              }
+ 347   4                         else if(i_comma == 2)
+ 348   4                              {
+ 349   5                                      if(mess[r] == 'A') 
+ 350   5                                              ValidGPS = 1;
+ 351   5                                      else
+ 352   5                                      {
+ 353   6                                              ValidGPS = 0;
+ 354   6      //                                      flNoKoord = 1;
+ 355   6      //                                      liTimer_tick_GPS = liTimer_tick;
+ 356   6                                      }
+ 357   5                              }
+ 358   4               else if (ValidGPS)
+ 359   4                              {
+ 360   5                                      
+ 361   5                                      if (i_comma == 3)                                       //Latitude
+ 362   5                                      {
+ 363   6                                              if(mess[r] == '.')
+ 364   6                                              {
+ 365   7                                                      flPoint = 1;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 7   
+
+ 366   7                                                      i = 0;
+ 367   7                                              }
+ 368   6                                              else if (flPoint == 0)                                          //Целая часть
+ 369   6                                              {
+ 370   7                                                      tmpGPS[i++] = mess[r];
+ 371   7                                                      if(i == 2)
+ 372   7                                                      {
+ 373   8                                         tmpGPS[i] = 0;
+ 374   8                                                              temp_koord = atoi(tmpGPS);
+ 375   8                                      temp_koord = 60UL*10000*temp_koord;
+ 376   8                                                      }       
+ 377   7                                                      else if(i == 4)
+ 378   7                                                      {
+ 379   8                                                              tmpGPS[0] = tmpGPS[1] = '0';
+ 380   8                                         tmpGPS[i] = 0;
+ 381   8                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 382   8                                                      }       
+ 383   7                                              }
+ 384   6                                              else                                                                                            //Дробная часть
+ 385   6                                              {
+ 386   7                                                      tmpGPS[i++] = mess[r];
+ 387   7                                 tmpGPS[i] = 0;
+ 388   7                                              }
+ 389   6                                      }
+ 390   5                                      else if (i_comma == 4)
+ 391   5                                      {
+ 392   6                              temp_koord = temp_koord+atoi(tmpGPS);
+ 393   6      //-----------
+ 394   6      //lLatFly = 55UL*60*10000+50UL*10000+8680;
+ 395   6      //--------
+ 396   6                                              if (mess[r] == 'S')                                             //знак Latitude
+ 397   6                                                      LatFly = 54000000UL-temp_koord;         //90UL*60*10000-koord;
+ 398   6                                              else              
+ 399   6                                                      LatFly = 54000000UL+temp_koord;         //90UL*60*10000+koord;
+ 400   6                                      }
+ 401   5                                      else if (i_comma == 5)                          //Longitude
+ 402   5                                      {
+ 403   6                                              if(mess[r] == '.')
+ 404   6                                              {
+ 405   7                                                      flPoint = 1;
+ 406   7                                                      i = 0;
+ 407   7                                              }
+ 408   6                                              else if (flPoint == 0)                                          //Целая часть
+ 409   6                                              {
+ 410   7                                                      tmpGPS[i++] = mess[r];
+ 411   7                                                      if(i == 3)
+ 412   7                                                      {
+ 413   8                                         tmpGPS[i] = 0;
+ 414   8                                      temp_koord = atoi(tmpGPS);
+ 415   8                                      temp_koord = 60UL*10000*temp_koord;
+ 416   8                                                      }       
+ 417   7                                                      else if(i == 5)
+ 418   7                                                      {
+ 419   8                                                              tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+ 420   8                                         tmpGPS[i] = 0;
+ 421   8                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 422   8                                                      }       
+ 423   7                                              }
+ 424   6                                              else                                                                                            //Дробная часть
+ 425   6                                              {
+ 426   7                                                      tmpGPS[i++] = mess[r];
+ 427   7                                 tmpGPS[i] = 0;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 8   
+
+ 428   7                                              }
+ 429   6                                      }
+ 430   5                                      else if (i_comma == 6)
+ 431   5                                      {
+ 432   6                              temp_koord = temp_koord+atoi(tmpGPS);
+ 433   6      //----------------
+ 434   6      //lLonFly = 49UL*60*10000+6UL*10000+3760;
+ 435   6      //----------------
+ 436   6                                              if (mess[r] == 'W')                                             //знак Longitude
+ 437   6                                                      LonFly = 108000000UL-temp_koord;                //180UL*60*10000-koord;
+ 438   6                                              else       
+ 439   6                                                      LonFly = temp_koord+108000000UL;                //180UL*60*10000;
+ 440   6                                      }
+ 441   5                                      else if (i_comma == 7)                                                  //скорость в узлах
+ 442   5                                      {
+ 443   6                                              if(mess[r] == '.')
+ 444   6                                              {
+ 445   7                                                      flPoint = 1;
+ 446   7                              Vz = 1.852*atoi(tmpGPS)/3.6;            //Преобразовать из узлов в м/с
+ 447   7      //---------
+ 448   7      //Vz = 20;
+ 449   7      //-----------
+ 450   7                                              }
+ 451   6                                              else if(flPoint == 0)
+ 452   6                                              {
+ 453   7                                                      tmpGPS[i++] = mess[r];
+ 454   7                              tmpGPS[i] = 0;
+ 455   7                                              }
+ 456   6                  }
+ 457   5                                      else if (i_comma == 8)                                                  //курс в градусах
+ 458   5                                      {
+ 459   6                                              if(mess[r] == '.')
+ 460   6                                              {
+ 461   7                                                      flPoint = 1;
+ 462   7                              koors = atoi(tmpGPS);
+ 463   7                        if (koors < 0)
+ 464   7                           koors = 360+koors;
+ 465   7      
+ 466   7                                                      flNoKoord = 0;
+ 467   7                                                      flNewGPS = 1;
+ 468   7                                                      liTimer_tick_GPS = liTimer_tick;        
+ 469   7      //                          OutModem20();
+ 470   7      //-----------                                              
+ 471   7      //koors = 30;
+ 472   7      //-----------
+ 473   7                                              }
+ 474   6                                              else if(flPoint == 0)
+ 475   6                                              {
+ 476   7                                                      tmpGPS[i++] = mess[r];
+ 477   7                              tmpGPS[i] = 0;
+ 478   7                                              }
+ 479   6                  }
+ 480   5                              }
+ 481   4                              r++;
+ 482   4                      if(r >= NS)
+ 483   4                              {
+ 484   5                      r = 0;
+ 485   5                                      mar = 0;        
+ 486   5                              }      
+ 487   4                      }
+ 488   3              }
+ 489   2              
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 9   
+
+ 490   2      //Опрос SMBus-------------------------------------------------------------------------
+ 491   2      //sfr SMB0CN   = 0xC0;    /* SMBUS 0 CONTROL                              */
+ 492   2      //sfr SMB0STA  = 0xC1;    /* SMBUS 0 STATUS                               */
+ 493   2      //sfr SMB0DAT  = 0xC2;    /* SMBUS 0 DATA                                 */
+ 494   2      //sfr SMB0ADR  = 0xC3;    /* SMBUS 0 SLAVE ADDRESS                        */
+ 495   2      //sfr SMB0CR   = 0xCF;    /* SMBUS 0 CLOCK RATE                           */
+ 496   2      /* SMB0CN 0xC0 */
+ 497   2      //sbit BUSY   = SMB0CN ^ 7;           /* SMBUS 0 BUSY                    */
+ 498   2      //sbit ENSMB  = SMB0CN ^ 6;           /* SMBUS 0 ENABLE                  */
+ 499   2      //sbit STA    = SMB0CN ^ 5;           /* SMBUS 0 START FLAG              */
+ 500   2      //sbit STO    = SMB0CN ^ 4;           /* SMBUS 0 STOP FLAG               */
+ 501   2      //sbit SI     = SMB0CN ^ 3;           /* SMBUS 0 INTERRUPT PENDING FLAG  */
+ 502   2      //sbit AA     = SMB0CN ^ 2;           /* SMBUS 0 ASSERT/ACKNOWLEDGE FLAG */
+ 503   2      //sbit SMBFTE = SMB0CN ^ 1;           /* SMBUS 0 FREE TIMER ENABLE       */
+ 504   2      //sbit SMBTOE = SMB0CN ^ 0;           /* SMBUS 0 TIMEOUT ENABLE          */
+ 505   2      //#define  SMB0_PAGE         0x00     /* SMBUS 0                            */
+ 506   2      
+ 507   2      if(u0timer>0xf0)
+ 508   2      {
+ 509   3              LED=!LED;
+ 510   3              SFRPAGE   = SMB0_PAGE;
+ 511   3              ENSMB = 1;
+ 512   3              
+ 513   3              SMB0ADR = 000;
+ 514   3              STA = 1;
+ 515   3              SMB0DAT = 0x03;
+ 516   3                      Temperature = SMB0DAT;
+ 517   3              STO = 1;
+ 518   3      
+ 519   3              STA = 1;
+ 520   3              SMB0DAT = 0x05;
+ 521   3                      Humidity = SMB0DAT;
+ 522   3              STO = 1;
+ 523   3              
+ 524   3              ENSMB = 0;
+ 525   3      }
+ 526   2      
+ 527   2      //Работа с COM портом-----------------------------------------------------------------
+ 528   2      
+ 529   2      if(u0timer>0xf0)
+ 530   2      {
+ 531   3              u0timer = 0;
+ 532   3      //      ES0=1;
+ 533   3              if(wBFM > 4)
+ 534   3              {
+ 535   4                      if(BuferFromModem [wBFM-1]==0x41)
+ 536   4                      {
+ 537   5                              if(BuferFromModem [wBFM-4]==0x40)
+ 538   5                              {
+ 539   6                                      Aint.b[0] = BuferFromModem[wBFM-3];
+ 540   6                                      Aint.b[1] = BuferFromModem[wBFM-2];
+ 541   6                                      if(Aint.i<=0x0fff)
+ 542   6                                      {
+ 543   7                                              LirTarget = Aint.i;
+ 544   7                                      }
+ 545   6                              }       
+ 546   5                      }
+ 547   4                      wBFM = 0;
+ 548   4              }
+ 549   3                      //      TI0 = 1; //Read redy UART0
+ 550   3                      //Write to UART0--------------------------------------
+ 551   3                      Aint.i = LirData;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 10  
+
+ 552   3                      BufferInModem[0] = 0x40+1;
+ 553   3                      BufferInModem[1] = Aint.b[0];           
+ 554   3                      BufferInModem[2] = Aint.b[1];
+ 555   3                      Bfloat.f= Vspeed; 
+ 556   3                      BufferInModem[3] = Bfloat.b[0];
+ 557   3                      BufferInModem[4] = Bfloat.b[1];
+ 558   3                      BufferInModem[5] = Bfloat.b[2];
+ 559   3                      BufferInModem[6] = Bfloat.b[3];
+ 560   3                      Bfloat.f= Angle;
+ 561   3                      BufferInModem[7] = Bfloat.b[0];
+ 562   3                      BufferInModem[8] = Bfloat.b[1];
+ 563   3                      BufferInModem[9] = Bfloat.b[2];
+ 564   3                      BufferInModem[10] = Bfloat.b[3];
+ 565   3                      BufferInModem[11] = 0x40;
+ 566   3      
+ 567   3                      BufferInModem[12] = 0;
+ 568   3                      for (i = 0; i < 12; i++ )
+ 569   3                              BufferInModem[12] = BufferInModem[12] ^ BufferInModem[i];
+ 570   3                      BufferInModem[12] = 0x80 | BufferInModem[12];
+ 571   3      
+ 572   3                      flTransmiter = 1;
+ 573   3              
+ 574   3              r0 = 0;
+ 575   3              rk = 13;
+ 576   3                      SFRPAGE = 0x00;
+ 577   3      
+ 578   3                      while (flTransmiter)
+ 579   3                      {
+ 580   4                              if(r0 < rk)
+ 581   4                              {
+ 582   5                                      flTransmiter = 1;
+ 583   5                                      SBUF0 = BufferInModem[r0++];
+ 584   5                              }
+ 585   4                              else
+ 586   4                              {
+ 587   5                                      flTransmiter = 0;
+ 588   5                              }
+ 589   4                      }
+ 590   3      //              ES0=0;
+ 591   3      }
+ 592   2              //------------------------------------------------------------
+ 593   2              }
+ 594   1      /*
+ 595   1      //UART----------------------------
+ 596   1              rBFM = wBFM = marBFM = 0;
+ 597   1              for(PWM = 1; PWM < 15; PWM++)
+ 598   1              {
+ 599   1                      Value = 37500;
+ 600   1                      write(PWM+112, Value);
+ 601   1              }
+ 602   1      
+ 603   1              while(1)
+ 604   1              {
+ 605   1              if(rBFM < wBFM+marBFM*NBFM)
+ 606   1              {
+ 607   1                              if ((BuferFromModem[rBFM] & 0xC0) == 0x40)
+ 608   1                              {
+ 609   1                                      nByte = 0;
+ 610   1                                      KontrSumma = 0;
+ 611   1                                      PWM = BuferFromModem[rBFM] & 0x3f;
+ 612   1                              }
+ 613   1                              if (nByte > 25)
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 11  
+
+ 614   1                                      nByte = 25;
+ 615   1                              RK_code[nByte] = BuferFromModem[rBFM] & 0x7f;
+ 616   1                              KontrSumma = KontrSumma^RK_code[nByte++];
+ 617   1      
+ 618   1                              if ( (nByte == 5) && (KontrSumma == 0) )
+ 619   1                              {
+ 620   1                                      Value = RK_code[1]+((unsigned int)RK_code[2] << 7)+((unsigned int)RK_code[3] << 14);
+ 621   1                                      write(PWM+112, Value);
+ 622   1                              }
+ 623   1      
+ 624   1               rBFM++;
+ 625   1                              if(rBFM >= NBFM)
+ 626   1                              {
+ 627   1                              rBFM = 0;
+ 628   1                                      marBFM = 0;
+ 629   1                              }
+ 630   1            }
+ 631   1                                      //-----------------------------------------------------------------------------------
+ 632   1                      if(flNewGPS)    
+ 633   1                      {
+ 634   1                              flNewGPS = 0;
+ 635   1               OutModem20();
+ 636   1      
+ 637   1                              if (RegimeKren == 0 || RegimeStart == 0) //не ручное управление
+ 638   1                                      break; 
+ 639   1      start1:
+ 640   1                              dz = LonMar[n_];
+ 641   1                              dz = 0.1856*(dz - LonFly)*cos_Lat0;
+ 642   1                         dx = LatMar[n_];
+ 643   1                         dx = 0.1856*(dx-LatFly);
+ 644   1      
+ 645   1      //                      if(RegimeKren)//автономный полет
+ 646   1      //                      {
+ 647   1                              dz_pr = LonMar[n_-1];
+ 648   1                                 dz_pr = 0.1856*(dz_pr-LonFly)*cos_Lat0;
+ 649   1                              dx_pr = LatMar[n_-1];
+ 650   1                              dx_pr = 0.1856*(dx_pr-LatFly);
+ 651   1      
+ 652   1                                 tmp =sqrt(dz*dz+dx*dx);              //tmp = rasst_toch_mar
+ 653   1                              if ((EPSILON > tmp) && (n_ != i_mar) && (n_ != 0))
+ 654   1                                 {
+ 655   1                              if ((n_ == i_mar-2) && (fabs(H_dat-100) > 50))
+ 656   1                                      ;
+ 657   1                              else
+ 658   1                              {
+ 659   1                                      n_++;
+ 660   1                                      flCommand = 1;
+ 661   1      
+ 662   1                                      if (RegimeV == 2)
+ 663   1                              Vz_zad = Vz_Mar[n_];
+ 664   1                                      if (RegimeVy == 2)
+ 665   1                              H_zad_buf = H_Mar[n_];
+ 666   1                                      goto start1;
+ 667   1                              }
+ 668   1      //                      }
+ 669   1      
+ 670   1                         if ( (fabs(dx-dx_pr) <= FLT_EPSILON) && (fabs(dz-dz_pr) <= FLT_EPSILON) )
+ 671   1                              napr_vetv_mar = 0;
+ 672   1                              else
+ 673   1                              napr_vetv_mar = atan2(dz-dz_pr, dx-dx_pr);
+ 674   1      
+ 675   1                      if ( (fabs(dx) <= FLT_EPSILON) && (fabs(dz) <= FLT_EPSILON) )
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 12  
+
+ 676   1                              angle = 0;
+ 677   1                      else
+ 678   1                              angle = atan2(dz, dx);  //napr_toch_mar = atan2(dz, dx),
+ 679   1                      angle = angle-napr_vetv_mar;
+ 680   1      
+ 681   1                                 otkl_ot_mar = tmp*sin(angle);
+ 682   1                                      if (fabs(otkl_ot_mar) > 500) tmp = 200; //tmp = l_km
+ 683   1                                      else                         tmp = 500;
+ 684   1                                 dz = otkl_ot_mar*cos(napr_vetv_mar)+tmp*sin(napr_vetv_mar);  //dz = z_toch_pricel
+ 685   1                              dx = -otkl_ot_mar*sin(napr_vetv_mar)+tmp*cos(napr_vetv_mar);    //dx = x_toch_pricel
+ 686   1                              }
+ 687   1                              tmp = koors;
+ 688   1                              tmp =  -tmp/ToGrad;
+ 689   1                      if ( (fabs(dx) > FLT_EPSILON) && (fabs(dz) > FLT_EPSILON) )
+ 690   1                                      tmp =  tmp + atan2(dz, dx);
+ 691   1      
+ 692   1                         while (tmp > M_PI)
+ 693   1                      tmp -= D_PI;
+ 694   1                         while (tmp < -M_PI)
+ 695   1                      tmp += D_PI;
+ 696   1      
+ 697   1                         tmp = ToGrad*tmp;            
+ 698   1                              if(tmp > 42)
+ 699   1                                      tmp = 42;
+ 700   1                         else if(tmp < -42)
+ 701   1                                      tmp = -42;
+ 702   1                              kren_zad_buf = tmp;
+ 703   1                      }
+ 704   1            else if (liTimer_tick-liTimer_tick_GPS > 2*FREQ) //Отсутствие координат
+ 705   1                      {
+ 706   1                              flNoKoord = 1;
+ 707   1                              liTimer_tick_GPS = liTimer_tick;        
+ 708   1               OutModem20();
+ 709   1                      }
+ 710   1      
+ 711   1                      //Расшифровка посылки GPS
+ 712   1                      if (r < w+mar*NS) 
+ 713   1                      {
+ 714   1                              if(mess[r] == '$')
+ 715   1                              {
+ 716   1                  nLetter = 0;
+ 717   1                              }
+ 718   1               else if ((nLetter == 0) && (mess[r] == 'G'))
+ 719   1                  nLetter++;
+ 720   1               else if ((nLetter == 1) && (mess[r] == 'P'))
+ 721   1                  nLetter++;
+ 722   1               else if ((nLetter == 2) && (mess[r] == 'R'))
+ 723   1                  nLetter++;
+ 724   1               else if ((nLetter == 3) && (mess[r] == 'M'))
+ 725   1                  nLetter++;
+ 726   1               else if ((nLetter == 4) && (mess[r] == 'C'))
+ 727   1               {
+ 728   1                  nLetter++;
+ 729   1                                      i_comma = 0;
+ 730   1                                      ValidGPS = 0;
+ 731   1               } 
+ 732   1                         else if(mess[r] == ',')
+ 733   1                              {
+ 734   1                                      i_comma++;
+ 735   1                                      i = 0;
+ 736   1                                      flPoint = 0;
+ 737   1                              }
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 13  
+
+ 738   1                         else if(i_comma == 2)
+ 739   1                              {
+ 740   1                                      if(mess[r] == 'A') 
+ 741   1                                              ValidGPS = 1;
+ 742   1                                      else
+ 743   1                                      {
+ 744   1                                              ValidGPS = 0;
+ 745   1      //                                      flNoKoord = 1;
+ 746   1      //                                      liTimer_tick_GPS = liTimer_tick;
+ 747   1                                      }
+ 748   1                              }
+ 749   1               else if (ValidGPS)
+ 750   1                              {
+ 751   1                                      if (i_comma == 3)                //Latitude
+ 752   1                                      {
+ 753   1                                              if(mess[r] == '.')
+ 754   1                                              {
+ 755   1                                                      flPoint = 1;
+ 756   1                                                      i = 0;
+ 757   1                                              }
+ 758   1                                              else if (flPoint == 0)                  //Целая часть
+ 759   1                                              {
+ 760   1                                                      tmpGPS[i++] = mess[r];
+ 761   1                                                      if(i == 2)
+ 762   1                                                      {
+ 763   1                                         tmpGPS[i] = 0;
+ 764   1                                                              temp_koord = atoi(tmpGPS);
+ 765   1                                      temp_koord = 60UL*10000*temp_koord;
+ 766   1                                                      }       
+ 767   1                                                      else if(i == 4)
+ 768   1                                                      {
+ 769   1                                                              tmpGPS[0] = tmpGPS[1] = '0';
+ 770   1                                         tmpGPS[i] = 0;
+ 771   1                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 772   1                                                      }       
+ 773   1                                              }
+ 774   1                                              else                                    //Дробная часть
+ 775   1                                              {
+ 776   1                                                      tmpGPS[i++] = mess[r];
+ 777   1                                 tmpGPS[i] = 0;
+ 778   1                                              }
+ 779   1                                      }
+ 780   1                                      else if (i_comma == 4)
+ 781   1                                      {
+ 782   1                              temp_koord = temp_koord+atoi(tmpGPS);
+ 783   1      //-----------
+ 784   1      //lLatFly = 55UL*60*10000+50UL*10000+8680;
+ 785   1      //--------
+ 786   1                                              if (mess[r] == 'S')                             //знак Latitude
+ 787   1                                                      LatFly = 54000000UL-temp_koord;         //90UL*60*10000-koord;
+ 788   1                                              else              
+ 789   1                                                      LatFly = 54000000UL+temp_koord; //90UL*60*10000+koord;
+ 790   1                                      }
+ 791   1                                      else if (i_comma == 5)                //Longitude
+ 792   1                                      {
+ 793   1                                              if(mess[r] == '.')
+ 794   1                                              {
+ 795   1                                                      flPoint = 1;
+ 796   1                                                      i = 0;
+ 797   1                                              }
+ 798   1                                              else if (flPoint == 0)                  //Целая часть
+ 799   1                                              {
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 14  
+
+ 800   1                                                      tmpGPS[i++] = mess[r];
+ 801   1                                                      if(i == 3)
+ 802   1                                                      {
+ 803   1                                         tmpGPS[i] = 0;
+ 804   1                                      temp_koord = atoi(tmpGPS);
+ 805   1                                      temp_koord = 60UL*10000*temp_koord;
+ 806   1                                                      }       
+ 807   1                                                      else if(i == 5)
+ 808   1                                                      {
+ 809   1                                                              tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+ 810   1                                         tmpGPS[i] = 0;
+ 811   1                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 812   1                                                      }       
+ 813   1                                              }
+ 814   1                                              else                                    //Дробная часть
+ 815   1                                              {
+ 816   1                                                      tmpGPS[i++] = mess[r];
+ 817   1                                 tmpGPS[i] = 0;
+ 818   1                                              }
+ 819   1                                      }
+ 820   1                                      else if (i_comma == 6)
+ 821   1                                      {
+ 822   1                              temp_koord = temp_koord+atoi(tmpGPS);
+ 823   1      //----------------
+ 824   1      //lLonFly = 49UL*60*10000+6UL*10000+3760;
+ 825   1      //----------------
+ 826   1                                              if (mess[r] == 'W')   //знак Longitude
+ 827   1                                                      LonFly = 108000000UL-temp_koord;                //180UL*60*10000-koord;
+ 828   1                                              else       
+ 829   1                                                      LonFly = temp_koord+108000000UL;        //180UL*60*10000;
+ 830   1                                      }
+ 831   1                                      else if (i_comma == 7)  //скорость в узлах
+ 832   1                                      {
+ 833   1                                              if(mess[r] == '.')
+ 834   1                                              {
+ 835   1                                                      flPoint = 1;
+ 836   1                              Vz = 1.852*atoi(tmpGPS)/3.6;   //??? Преобразовать из узлов в м/с
+ 837   1      //---------
+ 838   1      //Vz = 20;
+ 839   1      //-----------
+ 840   1                                              }
+ 841   1                                              else if(flPoint == 0)
+ 842   1                                              {
+ 843   1                                                      tmpGPS[i++] = mess[r];
+ 844   1                              tmpGPS[i] = 0;
+ 845   1                                              }
+ 846   1                  }
+ 847   1                                      else if (i_comma == 8)  //курс в градусах
+ 848   1                                      {
+ 849   1                                              if(mess[r] == '.')
+ 850   1                                              {
+ 851   1                                                      flPoint = 1;
+ 852   1                              koors = atoi(tmpGPS);
+ 853   1                        if (koors < 0)
+ 854   1                           koors = 360+koors;
+ 855   1      
+ 856   1                                                      flNoKoord = 0;
+ 857   1                                                      flNewGPS = 1;
+ 858   1                                                      liTimer_tick_GPS = liTimer_tick;        
+ 859   1                                  OutModem20();
+ 860   1      //-----------                                              
+ 861   1      //koors = 30;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 15  
+
+ 862   1      //-----------
+ 863   1                                              }
+ 864   1                                              else if(flPoint == 0)
+ 865   1                                              {
+ 866   1                                                      tmpGPS[i++] = mess[r];
+ 867   1                              tmpGPS[i] = 0;
+ 868   1                                              }
+ 869   1                  }
+ 870   1                              }
+ 871   1                              r++;
+ 872   1                      if(r >= NS)
+ 873   1                              {
+ 874   1                      r = 0;
+ 875   1                                      mar = 0;        
+ 876   1                              }      
+ 877   1                      }
+ 878   1      
+ 879   1      
+ 880   1              }       
+ 881   1      */      
+ 882   1      //-----------------
+ 883   1      
+ 884   1      }
+ 885          
+ 886          //------------------------------------------------------------------------------------------
+ 887          //скорость ветра
+ 888          void INT0 (void) interrupt 0
+ 889          {
+ 890   1              TV = RTC - RTCV;
+ 891   1              RTCV = RTC;;
+ 892   1              EX0=0;
+ 893   1              return;
+ 894   1      }
+ 895          
+ 896          //------------------------------------------------------------------------------------
+ 897          void TIMER0_ISR (void) interrupt 1
+ 898          {
+ 899   1      //      xdata unsigned int i, delta, FdKoeff;
+ 900   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 901   1              SFRPAGE = TIMER01_PAGE;
+ 902   1              RTC++;
+ 903   1      //ветер-------------
+ 904   1              if(WSpeed)
+ 905   1                      EX0=1;
+ 906   1      
+ 907   1              if(WAngle)
+ 908   1                      EX1=1;
+ 909   1      //-------------------
+ 910   1              u0timer++; // COM u0
+ 911   1      //      u1timer++; // GPS u1
+ 912   1      //-------------------
+ 913   1              SFRPAGE = SFRPAGE_SAVE;
+ 914   1              return;
+ 915   1      }
+ 916          
+ 917          
+ 918          
+ 919          //направление ветра-------------------------------------------------------------------
+ 920          void INT1 (void) interrupt 2
+ 921          {
+ 922   1              TA = RTC - RTCA;
+ 923   1              RTCA = RTC;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 16  
+
+ 924   1              EX1=0;
+ 925   1              return;
+ 926   1      }
+ 927          
+ 928          //------------------------------------------------------------------------------------
+ 929          void TIMER_ISR1 (void) interrupt 3
+ 930          {
+ 931   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 932   1              SFRPAGE = TIMER01_PAGE;
+ 933   1              
+ 934   1              SFRPAGE = SFRPAGE_SAVE;
+ 935   1              return;
+ 936   1      }
+ 937          
+ 938          //-------------------------------------------------------------------
+ 939          void COM_UART0_isr(void) interrupt 4
+ 940          {
+ 941   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 942   1      //      INT Aint;
+ 943   1              SFRPAGE = UART0_PAGE;
+ 944   1      
+ 945   1              if (RI0)
+ 946   1              {
+ 947   2                      BuferFromModem [wBFM++] = SBUF0;  // read character
+ 948   2                      if(wBFM >= NBFM)
+ 949   2                      {
+ 950   3                      wBFM = 0;
+ 951   3                              marBFM = 1;
+ 952   3                      }/*
+ 953   2                      if(BuferFromModem [wBFM-1]==0x41)
+ 954   2                      {
+ 955   2                              if(BuferFromModem [wBFM-4]==0x40)
+ 956   2                              {
+ 957   2                                      Aint.b[0] = BuferFromModem[wBFM-3];
+ 958   2                                      Aint.b[1] = BuferFromModem[wBFM-2];
+ 959   2                                      if(Aint.i<=0x0fff)
+ 960   2                                      {
+ 961   2                                              LirTarget = Aint.i;
+ 962   2                                      }
+ 963   2                              }       
+ 964   2                      }*/
+ 965   2                      RI0 = 0;
+ 966   2              }
+ 967   1              if (TI0)
+ 968   1              {
+ 969   2                              
+ 970   2      
+ 971   2              }
+ 972   1      
+ 973   1              SFRPAGE = UART1_PAGE;
+ 974   1              if (RI1)
+ 975   1              {
+ 976   2                      flNewGPS = 1;
+ 977   2                      mess [w++] = SBUF1;  // read character
+ 978   2                      if(w >= NS)
+ 979   2                      {
+ 980   3                      w = 0;
+ 981   3                              mar = 1;
+ 982   3                      }
+ 983   2                      RI1 = 0;
+ 984   2              }
+ 985   1              SFRPAGE = SFRPAGE_SAVE;
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 17  
+
+ 986   1              return;
+ 987   1      }
+ 988          void Timer2_ISR(void) interrupt 5
+ 989          {
+ 990   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 991   1              SFRPAGE = 0x00;
+ 992   1      
+ 993   1              SFRPAGE = SFRPAGE_SAVE;
+ 994   1              return;
+ 995   1      }
+ 996          //------------------------------------------------------------------------------------
+ 997          void SMBus_isr(void) interrupt 7
+ 998          {
+ 999   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+1000   1              SFRPAGE = SMB0_PAGE;
+1001   1      
+1002   1              SFRPAGE = SFRPAGE_SAVE;
+1003   1              return;
+1004   1      }
+1005          
+1006          //------------------------------------------------------------------------------------
+1007          void PCA_isr(void) interrupt 9
+1008          {
+1009   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+1010   1              SFRPAGE = PCA0_PAGE;
+1011   1      
+1012   1              SFRPAGE = SFRPAGE_SAVE;
+1013   1              return;
+1014   1      }
+1015          //------------------------------------------------------------------------------------
+1016          void TIMER_ISR3 (void) interrupt 14
+1017          {
+1018   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+1019   1              SFRPAGE = TMR3_PAGE;
+1020   1      
+1021   1              SFRPAGE = SFRPAGE_SAVE;
+1022   1              return;
+1023   1      }
+1024          //-------------------------------------------------------------------
+1025          void GPS_UART1_isr(void) interrupt 20
+1026          {
+1027   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+1028   1              SFRPAGE = UART1_PAGE;
+1029   1              if (RI1)
+1030   1              {
+1031   2                      flNewGPS = 1;
+1032   2                      mess [w++] = SBUF1;  // read character
+1033   2                      if(w >= NS)
+1034   2                      {
+1035   3                      w = 0;
+1036   3                              mar = 1;
+1037   3                      }
+1038   2                      RI1 = 0;
+1039   2              }
+1040   1              if (TI1)
+1041   1              {
+1042   2                              
+1043   2              }
+1044   1      
+1045   1              SFRPAGE = SFRPAGE_SAVE;
+1046   1              return;
+1047   1      }
+C51 COMPILER V9.00   SERVO1                                                                08/06/2012 09:39:15 PAGE 18  
+
+1048          //------------------------------------------------------------------------------------------
+1049          //#endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3591    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =    246      22
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      13
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2       2
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

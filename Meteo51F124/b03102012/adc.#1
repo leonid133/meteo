@@ -1,0 +1,62 @@
+//-----------------------------------------------------------------------------
+// Includes
+//-----------------------------------------------------------------------------
+
+#include <c8051f120.h>                 // SFR declarations
+#include <stdio.h>                     
+#include "init.h"
+
+//-----------------------------------------------------------------------------
+// Function Prototypes
+//-----------------------------------------------------------------------------
+
+void adc (void);
+void Wait_MS(unsigned int ms);
+
+//-----------------------------------------------------------------------------
+
+void adc (void)
+{
+   long measurement;                   // Measured voltage in mV
+
+     // The 12-bit ADC value is averaged across INT_DEC measurements.  The result is 
+      // then stored in Result, and is right-justified 
+      // The measured voltage applied to AIN 0.1 is then:
+      //
+      //                           Vref (mV)
+      //   measurement (mV) =   --------------- * Result (bits) 
+      //                       (2^12)-1 (bits)
+
+    measurement =  Result * 2430 / 4095;
+
+    EA = 1;                          // Re-enable interrupts
+
+    SFRPAGE = UART0_PAGE;
+
+    printf("AIN0.1 voltage: %ld mV\n",measurement);
+
+}
+
+
+//-----------------------------------------------------------------------------
+
+void ADC0_ISR (void) interrupt 15
+{
+   AD0INT = 0;                         // Clear ADC conversion complete
+                                       // indicator
+   accumulator += ADC0;                // Read ADC value and add to running
+                                       // total
+   int_dec--;                          // Update decimation counter
+
+   if (int_dec == 0)                   // If zero, then post result
+   {
+      int_dec = 256;               // Reset counter
+      Result = accumulator >> 8;
+      accumulator = 0L;                // Reset accumulator
+   }
+}
+
+
+//-----------------------------------------------------------------------------
+// End Of File
+//-----------------------------------------------------------------------------

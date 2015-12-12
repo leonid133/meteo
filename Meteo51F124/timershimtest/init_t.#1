@@ -1,0 +1,253 @@
+#include "c8051f120.h"
+#include "init_t.h"
+
+//-----------------------------------------------------------------------------
+// 16-bit SFR Definitions for 'F12x
+//-----------------------------------------------------------------------------
+
+sfr16 ADC0     = 0xbe;                 // ADC0 data
+sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+sfr16 TMR2     = 0xcc;                 // Timer2
+sfr16 TMR3     = 0xcc;                 // Timer3
+
+#define SYSCLK      24810000//24883200 //(24856840L * 2 / 1)          
+#define SAMPLE_RATE  50000             // Sample frequency in Hz
+
+#define SAR_CLK      2500000           // Desired SAR clock speed
+
+
+#define BAUDRATEU0     115200            // Baud rate of UART0 in bps
+#define BAUDRATEU1		4800
+
+
+void Timer_Init()
+{
+//---------------------------------------
+    SFRPAGE   = TIMER01_PAGE;
+    TCON      = 0x50;
+    TMOD      = 0x21; //TMOD      = 0x11;
+// TH0 = A0; TL0 = 4b; 1000Hz
+// TH0 = ED; TL0 = A8; 200Hz
+    //TH0       = 0xA0;
+	 //TL0       = 0x4B;
+    
+	 
+	 CKCON      = 0x0c; //0x08;
+    IP        |= 0x02;	
+//---------------------------------------	
+
+   SFRPAGE = TMR3_PAGE;
+
+   TMR3CN = 0x04;                    
+   TMR3CF = 0x08;                    
+
+   RCAP3   = -SYSCLK/SAMPLE_RATE;                
+   TMR3    = RCAP3;                    
+   EIE2   &= ~0x01;                    
+   TR3     = 1;    
+	
+   EIP2      |= 0x01;                    
+}
+
+void UART0_Init (void) //COM Ì‡ Timer2
+{
+    char SFRPAGE_SAVE;
+
+    SFRPAGE_SAVE = SFRPAGE;
+
+	 SFRPAGE   = TMR2_PAGE;
+
+	 TMR2CF = 0x08; // Timer 2 Configuration
+    RCAP2 = - ((long) SYSCLK/BAUDRATEU0/16);
+
+    TMR2L = 0x00;   // Timer 2 Low Byte
+    TMR2H = 0x00;   // Timer 2 High Byte
+    TMR2CN = 0x04;  // Timer 2 CONTROL
+	 TR2 = 1;
+	 SFRPAGE = UART0_PAGE;
+
+	 SCON0 = 0x50;
+	 SSTA0 = 0x05;    
+
+	 ES0 = 1;
+	 IP |= 0x10;
+    SFRPAGE = SFRPAGE_SAVE;             // Restore SFRPAGE
+}
+
+void UART1_Init (void) //GPS Ì‡ Timer1
+{
+   char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+
+   SFRPAGE = UART1_PAGE;
+   SCON1   = 0x10;                     // SCON1: mode 0, 8-bit UART, enable RX
+
+   SFRPAGE = TIMER01_PAGE;
+   TMOD   &= ~0xF0;
+   TMOD   |=  0x20;                    // TMOD: timer 1, mode 2, 8-bit reload
+
+
+   if (SYSCLK/BAUDRATEU1/2/256 < 1) {
+      TH1 = -(SYSCLK/BAUDRATEU1/2);
+      CKCON |= 0x10;                   // T1M = 1; SCA1:0 = xx
+   } else if (SYSCLK/BAUDRATEU1/2/256 < 4) {
+      TH1 = -(SYSCLK/BAUDRATEU1/2/4);
+      CKCON &= ~0x13;                  // Clear all T1 related bits
+      CKCON |=  0x01;                  // T1M = 0; SCA1:0 = 01
+   } else if (SYSCLK/BAUDRATEU1/2/256 < 12) {
+      TH1 = -(SYSCLK/BAUDRATEU1/2/12);
+      CKCON &= ~0x13;                  // T1M = 0; SCA1:0 = 00
+   } else {
+      TH1 = -(SYSCLK/BAUDRATEU1/2/48);
+      CKCON &= ~0x13;                  // Clear all T1 related bits
+      CKCON |=  0x02;                  // T1M = 0; SCA1:0 = 10
+   }
+
+   TL1 = TH1;                          // init Timer1
+   TR1 = 1;                            // START Timer1
+   
+   EIE2      = 0x40;                   // Enable UART1 interrupts
+
+   SFRPAGE = UART1_PAGE;
+   EIP2    |= 0x40;                     // Make UART high priority
+
+   SFRPAGE = SFRPAGE_SAVE;             // Restore SFR page
+
+}
+
+void PCA_Init()
+{
+
+    SFRPAGE   = PCA0_PAGE;
+    PCA0CN    = 0x40;
+    PCA0MD    = 0x01; //	 ECF=1;
+    PCA0CPM0  = 0x43;
+	 PCA0CPH0  = 0xFF;
+	 PCA0CPL0  = 0xFF;
+	 PCA0CPM1  = 0x43;
+	 PCA0CPH1  = 0xFF;
+	 PCA0CPL1  = 0xFF;
+	 CF = 0;
+    EIP1      |= 0x08;
+}
+
+void ADC_Init()
+{
+ 
+   char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+
+   SFRPAGE = ADC0_PAGE;
+
+   ADC0CN = 0x04;                      // ADC0 disabled; normal tracking
+                                       // mode; ADC0 conversions are initiated
+                                       // on overflow of Timer3; ADC0 data is
+                                       // right-justified
+
+   REF0CN = 0x07;                      // Enable temp sensor, on-chip VREF,
+                                       // and VREF output buffer
+
+   AMX0CF = 0x00;                      // AIN inputs are single-ended (default)
+
+   AMX0SL = 0x01;                      // Select AIN0.1 pin as ADC mux input
+
+   ADC0CF = (SYSCLK/SAR_CLK) << 3;     // ADC conversion clock = 2.5MHz
+   ADC0CF |= 0x00;                     // PGA gain = 1 (default)
+
+   EIE2 |= 0x02;                       // enable ADC interrupts
+
+   SFRPAGE   = ADC0_PAGE;
+   ADC0CN    = 0x84;
+	
+   EIP2      |= 0x02;
+
+   SFRPAGE = SFRPAGE_SAVE;             // Restore SFR page
+	
+}
+//------------------------------------------------------------------------------------------
+void Port_IO_Init(void)
+{
+    // P0.0  -  TX0 (UART0), Open-Drain, Digital
+    // P0.1  -  RX0 (UART0), Open-Drain, Digital
+    // P0.2  -  SDA (SMBus), Open-Drain, Digital
+    // P0.3  -  SCL (SMBus), Open-Drain, Digital
+    // P0.4  -  TX1 (UART1), Open-Drain, Digital
+    // P0.5  -  RX1 (UART1), Open-Drain, Digital
+    // P0.6  -  CEX0 (PCA),  Push-Pull,  Digital ÿ»Ã
+    // P0.7  -  CEX1 (PCA),  Push-Pull,  Digital ÿ»Ã
+
+    // P1.0  -  T0 (Timer0), Push-Pull,  Digital
+    // P1.1  -  wind Speed INT0 (Tmr0), Push-Pull,  Digital
+    // P1.2  -  T1 (Timer1), Push-Pull,  Digital
+    // P1.3  -  wind Angle INT1 (Tmr1), Push-Pull,  Digital
+    // P1.4  -  T2 (Timer2), Push-Pull,  Digital
+	 // P2.0 À»– CLOCK
+	 // P2.1 À»– DATA
+
+    SFRPAGE   = CONFIG_PAGE;
+    P0MDOUT   = 0xff; //0xf3; 
+    P1MDOUT   = 0xFF;
+  	 P2MDOUT   = 0x7F;
+    XBR0      = 0x15;
+    XBR1      = 0xbe; //0x3E; //(^7 ‚˚‚Ó‰ËÏ Ì‡ sysclk Ì‡ ÌÓ„Û)
+    XBR2      = 0x44; 
+	 IP        |= 0x05;//int priority
+}
+ 
+void Oscillator_Init(void)
+{
+//	int loop;                           
+   char SFRPAGE_SAVE = SFRPAGE;        
+   SFRPAGE = CONFIG_PAGE;             
+
+   OSCICN = 0x83; 
+/*	                     
+   CLKSEL = 0x00;                      
+
+   SFRPAGE = CONFIG_PAGE;
+   PLL0CN  = 0x00;                   
+   SFRPAGE = LEGACY_PAGE;
+   FLSCL |=  0x30;
+   if (SYSCLK <= 25000000) {           
+   // Set FLASH read timing for <=25MHz
+      FLSCL &= ~0x30;
+   } else if (SYSCLK <= 50000000) {    
+   // Set FLASH read timing for <=50MHz
+      FLSCL &= ~0x20;
+   } else if (SYSCLK <= 75000000) {    
+   // Set FLASH read timing for <=75MHz
+      FLSCL &= ~0x10;
+   } else {                            // set FLASH read timing for <=100MHz
+      FLSCL &= ~0x00;
+   }
+   SFRPAGE = CONFIG_PAGE;
+   PLL0CN |= 0x01;                     // Enable Power to PLL
+   PLL0DIV = 0x01;                     // Set Pre-divide value to N (N = 1)
+	if (SYSCLK <= 25000000) { 
+	 	         
+   } else if (SYSCLK <= 50000000) {    
+		PLL0FLT = 0x21;
+   } else if (SYSCLK <= 75000000) {    
+		PLL0FLT = 0x01;
+   } else {                            // set FLASH read timing for <=100MHz
+      PLL0FLT = 0x01;
+   }
+	PLL0MUL = 0x02;
+   for (loop=0; loop < 256; loop++);   
+   PLL0CN  |= 0x02;                    
+   while(!(PLL0CN & 0x10));            
+   CLKSEL  = 0x02;            
+	       */
+   SFRPAGE = SFRPAGE_SAVE;             
+}
+
+void Interrupts_Init(void)
+{
+	 IE        = 0xBF;
+    EIE1      = 0x08;
+    EIE2      = 0x42; 
+}
+
+
+//------------------------------------------------------------------------------------------
+
+//#endif

@@ -1,0 +1,2 @@
+"C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init.obj",
+"C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\servo.obj"  TO "C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init" RS(256) PL(68) PW(78)  

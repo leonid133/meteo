@@ -1,0 +1,935 @@
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE SERVO
+OBJECT MODULE PLACED IN servo.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.exe servo.c DB OE BR
+
+line level    source
+
+   1          #include "c8051f120.h"
+   2          #include "init.h"
+   3          #include "comport.h"
+   4          #include <intrins.h>
+   5          #include <stdio.h>                     
+   6          #include <ctype.h>
+   7          
+   8          #define FREQT1 2041666 //510417
+   9          
+  10          sbit LED = P1^6;
+  11          sbit LED2 = P2^6;
+  12          sbit BUTTON = P3^7;
+  13          //шим на машинку
+  14          sbit P1_5 = P1^5;
+  15          sbit P1_7 = P1^7;
+  16          //--------------
+  17          //лир
+  18          sbit LIR_DATA = P2^0;
+  19          sbit LIR_SCK = P2^1;
+  20          
+  21          xdata unsigned char F;
+  22          xdata unsigned int LirData, LirTarget, Fdelta;
+  23          
+  24          typedef union INT {                   
+  25             unsigned int i;
+  26             unsigned char b[2];
+  27          } INT;
+  28          //---
+  29          //ветер
+  30          sbit P1_1=P1^1;
+  31          sbit P0_7=P0^7;
+  32          //xdata unsigned int Vtimer, Atimer;
+  33          xdata float Vspeed, Angle, dTimerTickV, dTimerTickA;
+  34          xdata unsigned char InitFlag;
+  35          xdata unsigned long timer_tick1, timer_tickA, timer_tickB;
+  36          
+  37          typedef union FLOAT {                   
+  38             float f;
+  39             unsigned char b[4];
+  40          } FLOAT;
+  41          //-----
+  42          //UART0
+  43          #define NBFM            50
+  44          xdata unsigned char BuferFromModem [NBFM]; 
+  45          xdata unsigned char wBFM, rBFM, marBFM;
+  46          
+  47          #define SIZE_BUFFER0            50
+  48          xdata char BufferInModem[SIZE_BUFFER0]; // Для отправки в последовательный порт
+  49          xdata int r0, rk;
+  50          bit flTransmiter;       
+  51          
+  52          #define NS      75
+  53          xdata char mess [NS], r, w, mar;                // Для анализа посылки GPS
+  54          
+  55          /*
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 2   
+
+  56          void UART0_isr(void);
+  57          void TIMER_ISR(void);
+  58          void TIMER_ISR3(void);*/
+  59          
+  60          //------------------------------------------------------------------------------
+  61          void OutModem1(unsigned char Data, char i)
+  62          {
+  63   1              BufferInModem[i] = Data | 0x80;
+  64   1      }
+  65          
+  66          //------------------------------------------------------------------------------
+  67          void OutModem2(unsigned int Data, char i)
+  68          {
+  69   1              BufferInModem[i] = (Data & 0x007f)| 0x80;
+  70   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7)| 0x80;
+  71   1      }
+  72          
+  73          //------------------------------------------------------------------------------
+  74          void OutModem4(unsigned long int Data, char i)
+  75          {
+  76   1              BufferInModem[i] = (Data & 0x0000007f)| 0x80;
+  77   1              BufferInModem[i+1] = ((Data & 0x3f80) >> 7) | 0x80;
+  78   1              BufferInModem[i+2] = ((Data & 0x1fc000) >> 14) | 0x80;
+  79   1         BufferInModem[i+3] = ((Data & 0xfe00000)>> 21) | 0x80;
+  80   1      }
+  81          //------------------------------------------------------------------------------------------
+  82          void main(void)
+  83          {
+  84   1              xdata unsigned int i;
+  85   1              INT Aint;
+  86   1              FLOAT Bfloat;
+  87   1              //UART----------
+  88   1         xdata char RK_code[26], nByte = 0, KontrSumma = 0, PWM;
+  89   1              unsigned int Value;
+  90   1      
+  91   1              //--------------
+  92   1       /*  bit ValidGPS, flPoint;     
+  93   1              xdata unsigned char i, i_comma, tmpGPS[6], nLetter = 7;
+  94   1              xdata unsigned long temp_koord;*/
+  95   1      
+  96   1              EA=0;
+  97   1              WDTCN = 0xDE;                       // Disable watchdog timer
+  98   1         WDTCN = 0xAD;   
+  99   1              P1_5=0;
+ 100   1              P1_7=0;
+ 101   1              Init_Device();
+*** WARNING C206 IN LINE 101 OF SERVO.C: 'Init_Device': missing function-prototype
+ 102   1              EA = 1;                             // Enable global interrupts
+ 103   1              LirTarget = 0x03ff;
+ 104   1              Fdelta = 0;
+ 105   1              if(InitFlag!=0x00)
+ 106   1              {
+ 107   2                      Vspeed=0.0;
+ 108   2                      Angle=0.0;
+ 109   2                      dTimerTickV=0.0;
+ 110   2                      dTimerTickA=0.0;
+ 111   2              
+ 112   2                      wBFM=0;
+ 113   2                      rBFM=0;
+ 114   2                      marBFM=0;
+ 115   2                      InitFlag=0x00;
+ 116   2              }
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 3   
+
+ 117   1      
+ 118   1      //   while(1)
+ 119   1              {
+ 120   2      /*
+ 121   2                      //Read redy UART0-------------------------------------
+ 122   2                      TI0=1;
+ 123   2                      //Write to UART0--------------------------------------
+ 124   2                      Aint.i = LirData;
+ 125   2                      BufferInModem[0] = 0x40+1;
+ 126   2                      BufferInModem[1] = Aint.b[0];           
+ 127   2                      BufferInModem[2] = Aint.b[1];
+ 128   2                      Bfloat.f= Vspeed; 
+ 129   2                      BufferInModem[3] = Bfloat.b[0];
+ 130   2                      BufferInModem[4] = Bfloat.b[1];
+ 131   2                      BufferInModem[5] = Bfloat.b[2];
+ 132   2                      BufferInModem[6] = Bfloat.b[3];
+ 133   2                      Bfloat.f= Angle;
+ 134   2                      BufferInModem[7] = Bfloat.b[0];
+ 135   2                      BufferInModem[8] = Bfloat.b[1];
+ 136   2                      BufferInModem[9] = Bfloat.b[2];
+ 137   2                      BufferInModem[10] = Bfloat.b[3];
+ 138   2                      BufferInModem[11] = 0x40;
+ 139   2      
+ 140   2                      BufferInModem[12] = 0;
+ 141   2                      for (i = 0; i < 12; i++ )
+ 142   2                              BufferInModem[12] = BufferInModem[12] ^ BufferInModem[i];
+ 143   2                      BufferInModem[12] = 0x80 | BufferInModem[12];
+ 144   2      
+ 145   2                      flTransmiter = 1;
+ 146   2              r0 = 0;
+ 147   2              rk = 13;
+ 148   2                      SFRPAGE = 0x00;
+ 149   2      
+ 150   2                      while (flTransmiter)
+ 151   2                      {
+ 152   2                              if(r0 < rk)
+ 153   2                              {
+ 154   2                                      flTransmiter = 1;
+ 155   2                                      SBUF0 = BufferInModem[r0++];
+ 156   2                                 //TI0   = 0; 
+ 157   2                              //while( !TI0 );
+ 158   2                              }
+ 159   2                              else
+ 160   2                              {
+ 161   2                                      flTransmiter = 0;
+ 162   2                              }
+ 163   2                      }
+ 164   2      */              //------------------------------------------------------------
+ 165   2              }
+ 166   1      
+ 167   1      //UART----------------------------
+ 168   1      /*      rBFM = wBFM = marBFM = 0;
+ 169   1              for(PWM = 1; PWM < 15; PWM++)
+ 170   1              {
+ 171   1                      Value = 37500;
+ 172   1                      write(PWM+112, Value);
+ 173   1              }
+ 174   1      
+ 175   1              while(1)
+ 176   1              {
+ 177   1              if(rBFM < wBFM+marBFM*NBFM)
+ 178   1              {
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 4   
+
+ 179   1                              if ((BuferFromModem[rBFM] & 0xC0) == 0x40)
+ 180   1                              {
+ 181   1                                      nByte = 0;
+ 182   1                                      KontrSumma = 0;
+ 183   1                                      PWM = BuferFromModem[rBFM] & 0x3f;
+ 184   1                              }
+ 185   1                              if (nByte > 25)
+ 186   1                                      nByte = 25;
+ 187   1                              RK_code[nByte] = BuferFromModem[rBFM] & 0x7f;
+ 188   1                              KontrSumma = KontrSumma^RK_code[nByte++];
+ 189   1      
+ 190   1                              if ( (nByte == 5) && (KontrSumma == 0) )
+ 191   1                              {
+ 192   1                                      Value = RK_code[1]+((unsigned int)RK_code[2] << 7)+((unsigned int)RK_code[3] << 14);
+ 193   1                                      write(PWM+112, Value);
+ 194   1                              }
+ 195   1      
+ 196   1               rBFM++;
+ 197   1                              if(rBFM >= NBFM)
+ 198   1                              {
+ 199   1                              rBFM = 0;
+ 200   1                                      marBFM = 0;
+ 201   1                              }
+ 202   1            }
+ 203   1                                      //-----------------------------------------------------------------------------------
+ 204   1                      if(flNewGPS)    
+ 205   1                      {
+ 206   1                              flNewGPS = 0;
+ 207   1               OutModem20();
+ 208   1      
+ 209   1                              if (RegimeKren == 0 || RegimeStart == 0) //не ручное управление
+ 210   1                                      break; 
+ 211   1      start1:
+ 212   1                              dz = LonMar[n_];
+ 213   1                              dz = 0.1856*(dz - LonFly)*cos_Lat0;
+ 214   1                         dx = LatMar[n_];
+ 215   1                         dx = 0.1856*(dx-LatFly);
+ 216   1      
+ 217   1      //                      if(RegimeKren)//автономный полет
+ 218   1      //                      {
+ 219   1                              dz_pr = LonMar[n_-1];
+ 220   1                                 dz_pr = 0.1856*(dz_pr-LonFly)*cos_Lat0;
+ 221   1                              dx_pr = LatMar[n_-1];
+ 222   1                              dx_pr = 0.1856*(dx_pr-LatFly);
+ 223   1      
+ 224   1                                 tmp =sqrt(dz*dz+dx*dx);              //tmp = rasst_toch_mar
+ 225   1                              if ((EPSILON > tmp) && (n_ != i_mar) && (n_ != 0))
+ 226   1                                 {
+ 227   1                              if ((n_ == i_mar-2) && (fabs(H_dat-100) > 50))
+ 228   1                                      ;
+ 229   1                              else
+ 230   1                              {
+ 231   1                                      n_++;
+ 232   1                                      flCommand = 1;
+ 233   1      
+ 234   1                                      if (RegimeV == 2)
+ 235   1                              Vz_zad = Vz_Mar[n_];
+ 236   1                                      if (RegimeVy == 2)
+ 237   1                              H_zad_buf = H_Mar[n_];
+ 238   1                                      goto start1;
+ 239   1                              }
+ 240   1      //                      }
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 5   
+
+ 241   1      
+ 242   1                         if ( (fabs(dx-dx_pr) <= FLT_EPSILON) && (fabs(dz-dz_pr) <= FLT_EPSILON) )
+ 243   1                              napr_vetv_mar = 0;
+ 244   1                              else
+ 245   1                              napr_vetv_mar = atan2(dz-dz_pr, dx-dx_pr);
+ 246   1      
+ 247   1                      if ( (fabs(dx) <= FLT_EPSILON) && (fabs(dz) <= FLT_EPSILON) )
+ 248   1                              angle = 0;
+ 249   1                      else
+ 250   1                              angle = atan2(dz, dx);  //napr_toch_mar = atan2(dz, dx),
+ 251   1                      angle = angle-napr_vetv_mar;
+ 252   1      
+ 253   1                                 otkl_ot_mar = tmp*sin(angle);
+ 254   1                                      if (fabs(otkl_ot_mar) > 500) tmp = 200; //tmp = l_km
+ 255   1                                      else                         tmp = 500;
+ 256   1                                 dz = otkl_ot_mar*cos(napr_vetv_mar)+tmp*sin(napr_vetv_mar);  //dz = z_toch_pricel
+ 257   1                              dx = -otkl_ot_mar*sin(napr_vetv_mar)+tmp*cos(napr_vetv_mar);    //dx = x_toch_pricel
+ 258   1                              }
+ 259   1                              tmp = koors;
+ 260   1                              tmp =  -tmp/ToGrad;
+ 261   1                      if ( (fabs(dx) > FLT_EPSILON) && (fabs(dz) > FLT_EPSILON) )
+ 262   1                                      tmp =  tmp + atan2(dz, dx);
+ 263   1      
+ 264   1                         while (tmp > M_PI)
+ 265   1                      tmp -= D_PI;
+ 266   1                         while (tmp < -M_PI)
+ 267   1                      tmp += D_PI;
+ 268   1      
+ 269   1                         tmp = ToGrad*tmp;            
+ 270   1                              if(tmp > 42)
+ 271   1                                      tmp = 42;
+ 272   1                         else if(tmp < -42)
+ 273   1                                      tmp = -42;
+ 274   1                              kren_zad_buf = tmp;
+ 275   1                      }
+ 276   1            else if (liTimer_tick-liTimer_tick_GPS > 2*FREQ) //Отсутствие координат
+ 277   1                      {
+ 278   1                              flNoKoord = 1;
+ 279   1                              liTimer_tick_GPS = liTimer_tick;        
+ 280   1               OutModem20();
+ 281   1                      }
+ 282   1      
+ 283   1                      //Расшифровка посылки GPS
+ 284   1                      if (r < w+mar*NS) 
+ 285   1                      {
+ 286   1                              if(mess[r] == '$')
+ 287   1                              {
+ 288   1                  nLetter = 0;
+ 289   1                              }
+ 290   1               else if ((nLetter == 0) && (mess[r] == 'G'))
+ 291   1                  nLetter++;
+ 292   1               else if ((nLetter == 1) && (mess[r] == 'P'))
+ 293   1                  nLetter++;
+ 294   1               else if ((nLetter == 2) && (mess[r] == 'R'))
+ 295   1                  nLetter++;
+ 296   1               else if ((nLetter == 3) && (mess[r] == 'M'))
+ 297   1                  nLetter++;
+ 298   1               else if ((nLetter == 4) && (mess[r] == 'C'))
+ 299   1               {
+ 300   1                  nLetter++;
+ 301   1                                      i_comma = 0;
+ 302   1                                      ValidGPS = 0;
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 6   
+
+ 303   1               } 
+ 304   1                         else if(mess[r] == ',')
+ 305   1                              {
+ 306   1                                      i_comma++;
+ 307   1                                      i = 0;
+ 308   1                                      flPoint = 0;
+ 309   1                              }
+ 310   1                         else if(i_comma == 2)
+ 311   1                              {
+ 312   1                                      if(mess[r] == 'A') 
+ 313   1                                              ValidGPS = 1;
+ 314   1                                      else
+ 315   1                                      {
+ 316   1                                              ValidGPS = 0;
+ 317   1      //                                      flNoKoord = 1;
+ 318   1      //                                      liTimer_tick_GPS = liTimer_tick;
+ 319   1                                      }
+ 320   1                              }
+ 321   1               else if (ValidGPS)
+ 322   1                              {
+ 323   1                                      if (i_comma == 3)                //Latitude
+ 324   1                                      {
+ 325   1                                              if(mess[r] == '.')
+ 326   1                                              {
+ 327   1                                                      flPoint = 1;
+ 328   1                                                      i = 0;
+ 329   1                                              }
+ 330   1                                              else if (flPoint == 0)                  //Целая часть
+ 331   1                                              {
+ 332   1                                                      tmpGPS[i++] = mess[r];
+ 333   1                                                      if(i == 2)
+ 334   1                                                      {
+ 335   1                                         tmpGPS[i] = 0;
+ 336   1                                                              temp_koord = atoi(tmpGPS);
+ 337   1                                      temp_koord = 60UL*10000*temp_koord;
+ 338   1                                                      }       
+ 339   1                                                      else if(i == 4)
+ 340   1                                                      {
+ 341   1                                                              tmpGPS[0] = tmpGPS[1] = '0';
+ 342   1                                         tmpGPS[i] = 0;
+ 343   1                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 344   1                                                      }       
+ 345   1                                              }
+ 346   1                                              else                                    //Дробная часть
+ 347   1                                              {
+ 348   1                                                      tmpGPS[i++] = mess[r];
+ 349   1                                 tmpGPS[i] = 0;
+ 350   1                                              }
+ 351   1                                      }
+ 352   1                                      else if (i_comma == 4)
+ 353   1                                      {
+ 354   1                              temp_koord = temp_koord+atoi(tmpGPS);
+ 355   1      //-----------
+ 356   1      //lLatFly = 55UL*60*10000+50UL*10000+8680;
+ 357   1      //--------
+ 358   1                                              if (mess[r] == 'S')                             //знак Latitude
+ 359   1                                                      LatFly = 54000000UL-temp_koord;         //90UL*60*10000-koord;
+ 360   1                                              else              
+ 361   1                                                      LatFly = 54000000UL+temp_koord; //90UL*60*10000+koord;
+ 362   1                                      }
+ 363   1                                      else if (i_comma == 5)                //Longitude
+ 364   1                                      {
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 7   
+
+ 365   1                                              if(mess[r] == '.')
+ 366   1                                              {
+ 367   1                                                      flPoint = 1;
+ 368   1                                                      i = 0;
+ 369   1                                              }
+ 370   1                                              else if (flPoint == 0)                  //Целая часть
+ 371   1                                              {
+ 372   1                                                      tmpGPS[i++] = mess[r];
+ 373   1                                                      if(i == 3)
+ 374   1                                                      {
+ 375   1                                         tmpGPS[i] = 0;
+ 376   1                                      temp_koord = atoi(tmpGPS);
+ 377   1                                      temp_koord = 60UL*10000*temp_koord;
+ 378   1                                                      }       
+ 379   1                                                      else if(i == 5)
+ 380   1                                                      {
+ 381   1                                                              tmpGPS[0] = tmpGPS[1] = tmpGPS[2] = '0';
+ 382   1                                         tmpGPS[i] = 0;
+ 383   1                                            temp_koord = temp_koord+10000UL*atoi(tmpGPS);
+ 384   1                                                      }       
+ 385   1                                              }
+ 386   1                                              else                                    //Дробная часть
+ 387   1                                              {
+ 388   1                                                      tmpGPS[i++] = mess[r];
+ 389   1                                 tmpGPS[i] = 0;
+ 390   1                                              }
+ 391   1                                      }
+ 392   1                                      else if (i_comma == 6)
+ 393   1                                      {
+ 394   1                              temp_koord = temp_koord+atoi(tmpGPS);
+ 395   1      //----------------
+ 396   1      //lLonFly = 49UL*60*10000+6UL*10000+3760;
+ 397   1      //----------------
+ 398   1                                              if (mess[r] == 'W')   //знак Longitude
+ 399   1                                                      LonFly = 108000000UL-temp_koord;                //180UL*60*10000-koord;
+ 400   1                                              else       
+ 401   1                                                      LonFly = temp_koord+108000000UL;        //180UL*60*10000;
+ 402   1                                      }
+ 403   1                                      else if (i_comma == 7)  //скорость в узлах
+ 404   1                                      {
+ 405   1                                              if(mess[r] == '.')
+ 406   1                                              {
+ 407   1                                                      flPoint = 1;
+ 408   1                              Vz = 1.852*atoi(tmpGPS)/3.6;   //??? Преобразовать из узлов в м/с
+ 409   1      //---------
+ 410   1      //Vz = 20;
+ 411   1      //-----------
+ 412   1                                              }
+ 413   1                                              else if(flPoint == 0)
+ 414   1                                              {
+ 415   1                                                      tmpGPS[i++] = mess[r];
+ 416   1                              tmpGPS[i] = 0;
+ 417   1                                              }
+ 418   1                  }
+ 419   1                                      else if (i_comma == 8)  //курс в градусах
+ 420   1                                      {
+ 421   1                                              if(mess[r] == '.')
+ 422   1                                              {
+ 423   1                                                      flPoint = 1;
+ 424   1                              koors = atoi(tmpGPS);
+ 425   1                        if (koors < 0)
+ 426   1                           koors = 360+koors;
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 8   
+
+ 427   1      
+ 428   1                                                      flNoKoord = 0;
+ 429   1                                                      flNewGPS = 1;
+ 430   1                                                      liTimer_tick_GPS = liTimer_tick;        
+ 431   1                                  OutModem20();
+ 432   1      //-----------                                              
+ 433   1      //koors = 30;
+ 434   1      //-----------
+ 435   1                                              }
+ 436   1                                              else if(flPoint == 0)
+ 437   1                                              {
+ 438   1                                                      tmpGPS[i++] = mess[r];
+ 439   1                              tmpGPS[i] = 0;
+ 440   1                                              }
+ 441   1                  }
+ 442   1                              }
+ 443   1                              r++;
+ 444   1                      if(r >= NS)
+ 445   1                              {
+ 446   1                      r = 0;
+ 447   1                                      mar = 0;        
+ 448   1                              }      
+ 449   1                      }
+ 450   1      
+ 451   1      
+ 452   1              }       
+ 453   1              */
+ 454   1      //-----------------
+ 455   1      }
+*** WARNING C280 IN LINE 84 OF SERVO.C: 'i': unreferenced local variable
+*** WARNING C280 IN LINE 85 OF SERVO.C: 'Aint': unreferenced local variable
+*** WARNING C280 IN LINE 86 OF SERVO.C: 'Bfloat': unreferenced local variable
+*** WARNING C280 IN LINE 88 OF SERVO.C: 'RK_code': unreferenced local variable
+*** WARNING C280 IN LINE 88 OF SERVO.C: 'PWM': unreferenced local variable
+*** WARNING C280 IN LINE 89 OF SERVO.C: 'Value': unreferenced local variable
+ 456          
+ 457          //------------------------------------------------------------------------------------------
+ 458          //скорость ветра
+ 459          void INT0 (void) interrupt 0
+ 460          {
+ 461   1              xdata unsigned int tmpint;
+ 462   1              tmpint = TH1; 
+ 463   1              timer_tick1 = (timer_tick1 & 0xffff0000) + (tmpint<<8) + TL1;
+ 464   1      //      dTimerTickV = dTimerTickV + ((timer_tick1 - timer_tickB) - dTimerTickV)*0.01;
+ 465   1              /*      
+ 466   1              if(dTimerTickV < 1000)
+ 467   1                      Vspeed = 681.;
+ 468   1              else if(dTimerTickV > 73000000)
+ 469   1                      Vspeed = 0.01;
+ 470   1              else
+ 471   1                      Vspeed = FREQT1/(dTimerTickV*0.75);
+ 472   1              */
+ 473   1              timer_tickB = timer_tick1;
+ 474   1      
+ 475   1      //      EX0=0;
+ 476   1              return;
+ 477   1      }
+ 478          
+ 479          //------------------------------------------------------------------------------------
+ 480          void TIMER_ISR0 (void) interrupt 1
+ 481          {
+ 482   1              xdata unsigned int i, delta, FdKoeff;
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 9   
+
+ 483   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 484   1              SFRPAGE = TIMER01_PAGE;
+ 485   1              //0xFFFF-TIMERCLC/FREQ; FREQ=1/T; 
+ 486   1      //ветер-------------
+ 487   1      /*
+ 488   1              if(P0_7!=0)
+ 489   1              {
+ 490   1                      EX0=1;
+ 491   1              }
+ 492   1              if(P1_1!=0)
+ 493   1              {
+ 494   1                      EX1=1;
+ 495   1              }*/
+ 496   1              //-------------------
+ 497   1              if(F==0x02)
+ 498   1              {
+ 499   2                      //Опрос ЛИР----------------------------
+ 500   2                      EA=0;
+ 501   2                      LirData = 0x0000;
+ 502   2                      //---init
+ 503   2                      LIR_SCK = 1;
+ 504   2                      LIR_SCK = 0;
+ 505   2                      //---D n-1
+ 506   2                      LIR_SCK = 1;
+ 507   2                      LIR_SCK = 0;
+ 508   2                      //---D n-1
+ 509   2                      LIR_SCK = 1;
+ 510   2                      LIR_SCK = 0;
+ 511   2                      if(LIR_DATA!=0) 
+ 512   2                      {
+ 513   3                              LirData = LirData | (0x1 << (11));
+ 514   3                      }
+ 515   2                      LIR_SCK = 1; 
+ 516   2                      LIR_SCK = 0;
+ 517   2                      if(LIR_DATA!=0) 
+ 518   2                      {
+ 519   3                              LirData = LirData | (0x1 << (10));
+ 520   3                      }
+ 521   2                      LIR_SCK = 1; 
+ 522   2                      LIR_SCK = 0;
+ 523   2                      if(LIR_DATA!=0) 
+ 524   2                      {
+ 525   3                              LirData = LirData | (0x1 << (9));
+ 526   3                      }
+ 527   2                      LIR_SCK = 1; 
+ 528   2                      LIR_SCK = 0;
+ 529   2                      if(LIR_DATA!=0) 
+ 530   2                      {
+ 531   3                              LirData = LirData | (0x1 << (8));
+ 532   3                      }
+ 533   2                      LIR_SCK = 1; 
+ 534   2                      LIR_SCK = 0;
+ 535   2                      if(LIR_DATA!=0) 
+ 536   2                      {
+ 537   3                              LirData = LirData | (0x1 << (7));
+ 538   3                      }
+ 539   2                      LIR_SCK = 1; 
+ 540   2                      LIR_SCK = 0;
+ 541   2                      if(LIR_DATA!=0) 
+ 542   2                      {
+ 543   3                              LirData = LirData | (0x1 << (6));
+ 544   3                      }
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 10  
+
+ 545   2                      LIR_SCK = 1; 
+ 546   2                      LIR_SCK = 0;
+ 547   2                      if(LIR_DATA!=0) 
+ 548   2                      {
+ 549   3                              LirData = LirData | (0x1 << (5));
+ 550   3                      }
+ 551   2                      LIR_SCK = 1; 
+ 552   2                      LIR_SCK = 0;
+ 553   2                      if(LIR_DATA!=0) 
+ 554   2                      {
+ 555   3                              LirData = LirData | (0x1 << (4));
+ 556   3                      }
+ 557   2                      LIR_SCK = 1; 
+ 558   2                      LIR_SCK = 0;
+ 559   2                      if(LIR_DATA!=0) 
+ 560   2                      {
+ 561   3                              LirData = LirData | (0x1 << (3));
+ 562   3                      }
+ 563   2                      LIR_SCK = 1; 
+ 564   2                      LIR_SCK = 0;
+ 565   2                      if(LIR_DATA!=0) 
+ 566   2                      {
+ 567   3                              LirData = LirData | (0x1 << (2));
+ 568   3                      }
+ 569   2                      LIR_SCK = 1; 
+ 570   2                      LIR_SCK = 0;
+ 571   2                      if(LIR_DATA!=0) 
+ 572   2                      {
+ 573   3                              LirData = LirData | (0x1 << (1));
+ 574   3                      }
+ 575   2                      LIR_SCK = 1; 
+ 576   2                      LIR_SCK = 0;
+ 577   2                      if(LIR_DATA!=0) 
+ 578   2                      {
+ 579   3                              LirData = LirData | (0x1 << (0));
+ 580   3                      }
+ 581   2                      LIR_SCK = 1; 
+ 582   2                      EA=1;
+ 583   2                      //---------------------------------------
+ 584   2                      delta = (LirTarget - LirData);  
+ 585   2                      if(delta > 0xF000)
+ 586   2                              delta = delta - 0xF000;
+ 587   2                      if(delta >= 0x07FF)
+ 588   2                      {
+ 589   3                              delta = 0x0FFF - delta;
+ 590   3                              if(delta < 0x0155)
+ 591   3                              {
+ 592   4                                      F = 0xC1;
+ 593   4                                      if(delta < 0x20 && delta > 0x0B)
+ 594   4                                      {
+ 595   5                                              FdKoeff=4;
+ 596   5                                      }
+ 597   4                                      else if(delta <= 0x0B)
+ 598   4                                      {
+ 599   5                                              F = 0x03; 
+ 600   5                                      }
+ 601   4                              }
+ 602   3                              else
+ 603   3                              {
+ 604   4                                      F=0xA1;
+ 605   4                              }
+ 606   3                      }
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 11  
+
+ 607   2                      else if(delta < 0x07FF)
+ 608   2                      {
+ 609   3                              if(delta < 0x0155)
+ 610   3                              {
+ 611   4                                      F = 0xC2;
+ 612   4                                      if(delta < 0x20 && delta > 0x0B)
+ 613   4                                      {
+ 614   5                                              FdKoeff=4;
+ 615   5                                      } 
+ 616   4                                      else if(delta <= 0x0B)
+ 617   4                                      {
+ 618   5                                              F = 0x03; 
+ 619   5                                      }
+ 620   4                              }
+ 621   3                              else
+ 622   3                              {
+ 623   4                                      F=0xA2;
+ 624   4                              }
+ 625   3                      }
+ 626   2              }
+ 627   1              //при отключенном лир, воздействие отсутствует------------------
+ 628   1              if(LirData==0x0FFF)
+ 629   1              {
+ 630   2                      F=0x03;
+ 631   2              }
+ 632   1              //---------------------------------------------------------------       
+ 633   1              //ШИМы на машинку--------------------------
+ 634   1              FdKoeff = 6;
+ 635   1              EA=0;
+ 636   1              if(F==0xA1)
+ 637   1              {
+ 638   2                      P1_7 = 0;
+ 639   2                      Fdelta =  delta - Fdelta;
+ 640   2                      Fdelta = delta;
+ 641   2                      while(FdKoeff!=0)
+ 642   2                      {
+ 643   3                              P1_5 = 1;
+ 644   3                              for(i=0;i<28;i++)
+ 645   3                                      _nop_();
+ 646   3                              P1_5 = 0;
+ 647   3                              for(i=0;i<63;i++)
+ 648   3                                      _nop_();
+ 649   3                              FdKoeff--;
+ 650   3                      }
+ 651   2              }
+ 652   1              else if(F==0xA2)
+ 653   1              {
+ 654   2                      P1_5 = 0;
+ 655   2                      Fdelta =  delta - Fdelta;
+ 656   2                      Fdelta = delta;
+ 657   2                      while(FdKoeff!=0)
+ 658   2                      {
+ 659   3                              P1_7 = 1;
+ 660   3                              for(i=0;i<28;i++)
+ 661   3                                      _nop_();
+ 662   3                              P1_7 = 0;
+ 663   3                              for(i=0;i<63;i++)
+ 664   3                                      _nop_();
+ 665   3                              FdKoeff--;
+ 666   3                      }
+ 667   2              }
+ 668   1              else if(F==0xC1)
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 12  
+
+ 669   1              {
+ 670   2                      P1_7 = 0;
+ 671   2                      Fdelta = delta-Fdelta;
+ 672   2                      if(Fdelta>0x0001)FdKoeff=2;
+ 673   2                      Fdelta = delta;
+ 674   2                      while(FdKoeff!=0)
+ 675   2                      {
+ 676   3                              P1_5 = 1;
+ 677   3                              for(i=0;i<25;i++)
+ 678   3                                      _nop_();
+ 679   3                              P1_5 = 0;
+ 680   3                              for(i=0;i<66;i++)
+ 681   3                                      _nop_();
+ 682   3                              FdKoeff--;
+ 683   3                      }
+ 684   2              }
+ 685   1              else if(F==0xC2)
+ 686   1              {
+ 687   2                      P1_5 = 0;
+ 688   2                      Fdelta =  delta - Fdelta;
+ 689   2                      if(Fdelta>0x0001)FdKoeff=2;
+ 690   2                      Fdelta = delta;
+ 691   2                      while(FdKoeff!=0)
+ 692   2                      {
+ 693   3                              P1_7 = 1;
+ 694   3                              for(i=0;i<25;i++)
+ 695   3                                      _nop_();
+ 696   3                              P1_7 = 0;
+ 697   3                              for(i=0;i<66;i++)
+ 698   3                                      _nop_();
+ 699   3                              FdKoeff--;
+ 700   3                      }
+ 701   2              }  
+ 702   1              //---------------------------------------------------------------
+ 703   1              P1_5 =0;
+ 704   1              P1_7 =0;
+ 705   1              EA=1;
+ 706   1              F=0x02;
+ 707   1      //**********************
+ 708   1      
+ 709   1              TH0 = 0xA0;
+ 710   1              TL0 = 0x4B;
+ 711   1                      
+ 712   1              SFRPAGE = SFRPAGE_SAVE;
+ 713   1              return;
+ 714   1      }
+ 715          
+ 716          
+ 717          
+ 718          //направление ветра-------------------------------------------------------------------
+ 719          void INT1 (void) interrupt 2
+ 720          {
+ 721   1              xdata unsigned int tmpint;
+ 722   1              
+ 723   1              tmpint = TH1;
+ 724   1              timer_tick1 = (timer_tick1&0xFFFF0000) + (tmpint<<8) + TL1;
+ 725   1      //      dTimerTickA = dTimerTickA + ((timer_tick1 - timer_tickA) - dTimerTickA)*0.01;
+ 726   1      //      Angle = (360.-(dTimerTickA/dTimerTickV)*360.);
+ 727   1              timer_tickA = timer_tick1;
+ 728   1      
+ 729   1      //      EX1=0;
+ 730   1              return;
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 13  
+
+ 731   1      }
+ 732          
+ 733          //------------------------------------------------------------------------------------
+ 734          void TIMER_ISR1 (void) interrupt 3
+ 735          {
+ 736   1              //INT Aint;
+ 737   1              //FLOAT Bfloat;
+ 738   1              //xdata unsigned int i;
+ 739   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 740   1              SFRPAGE = TIMER01_PAGE;
+ 741   1              LED2=!LED2;
+ 742   1              /*
+ 743   1      
+ 744   1              Atimer++;
+ 745   1              Vtimer++;
+ 746   1              
+ 747   1              if(Atimer>0x0460)
+ 748   1              {
+ 749   1                      Atimer = 0;
+ 750   1                      timer_tickA = timer_tick1;
+ 751   1              }
+ 752   1              if(Vtimer>0x0460)
+ 753   1              {
+ 754   1                      Vtimer = 0;
+ 755   1                      Vspeed = 0;
+ 756   1                      timer_tickB = timer_tick1;      
+ 757   1              }
+ 758   1              if(Atimer>0x02ff && Vtimer>0x02ff)
+ 759   1              {
+ 760   1                      dTimerTickV = dTimerTickV + ((timer_tick1 - timer_tickB) - dTimerTickV)*0.01;
+ 761   1                      dTimerTickA = dTimerTickA + ((timer_tick1 - timer_tickA) - dTimerTickA)*0.01;
+ 762   1                      Vspeed = FREQT1/(dTimerTickV*0.75);
+ 763   1              }*/
+ 764   1              timer_tick1 = timer_tick1 + 0x00010000;
+ 765   1              
+ 766   1              SFRPAGE = SFRPAGE_SAVE;
+ 767   1              return;
+ 768   1      }
+ 769          
+ 770          //-------------------------------------------------------------------
+ 771          void UART0_isr(void) interrupt 4
+ 772          {
+ 773   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 774   1              INT Aint;
+ 775   1              SFRPAGE = UART0_PAGE;
+ 776   1      
+ 777   1              if (RI0)
+ 778   1              {
+ 779   2                      BuferFromModem [wBFM++] = SBUF0;  // read character
+ 780   2                      if(wBFM >= NBFM)
+ 781   2                      {
+ 782   3                      wBFM = 0;
+ 783   3                              marBFM = 1;
+ 784   3                      }
+ 785   2                      if(BuferFromModem [wBFM-1]==0x41)
+ 786   2                      {
+ 787   3                              if(BuferFromModem [wBFM-4]==0x40)
+ 788   3                              {
+ 789   4                                      Aint.b[0] = BuferFromModem[wBFM-3];
+ 790   4                                      Aint.b[1] = BuferFromModem[wBFM-2];
+ 791   4                                      if(Aint.i<=0x0fff)
+ 792   4                                      {
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 14  
+
+ 793   5                                              LirTarget = Aint.i;
+ 794   5                                      }
+ 795   4                              }       
+ 796   3                      }
+ 797   2                      RI0 = 0;
+ 798   2              }
+ 799   1              if (TI0)
+ 800   1              {
+ 801   2                              
+ 802   2      /*              if(r0 < rk)
+ 803   2                      {
+ 804   2                              flTransmiter = 1;
+ 805   2                              SBUF0 = BufferInModem[r0++];
+ 806   2                      }
+ 807   2                      else                                            
+ 808   2                      {
+ 809   2                              flTransmiter = 0;                       //Окончание передачи
+ 810   2                              
+ 811   2                      }*/
+ 812   2              
+ 813   2              /*      while(r0 < rk)
+ 814   2                      {
+ 815   2                              flTransmiter = 1;
+ 816   2                              SBUF0 = BufferInModem[r0++];
+ 817   2                      }
+ 818   2                      flTransmiter = 0;*/
+ 819   2              }
+ 820   1              SFRPAGE = SFRPAGE_SAVE;
+ 821   1              return;
+ 822   1      }
+ 823          
+ 824          //------------------------------------------------------------------------------------
+ 825          void TIMER_ISR3 (void) interrupt 14
+ 826          {
+ 827   1      /*      INT Aint;
+ 828   1              FLOAT Bfloat;
+ 829   1              xdata unsigned int i;
+ 830   1      */
+ 831   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 832   1              SFRPAGE = TMR3_PAGE;
+ 833   1              TF3=0;
+ 834   1              LED=!LED;
+ 835   1      
+ 836   1              /*
+ 837   1              Atimer++;
+ 838   1              Vtimer++;
+ 839   1              
+ 840   1              if(Atimer>0x0460)
+ 841   1              {
+ 842   1                      Atimer = 0;
+ 843   1                      timer_tickA = timer_tick1;
+ 844   1              }
+ 845   1              if(Vtimer>0x0460)
+ 846   1              {
+ 847   1                      Vtimer = 0;
+ 848   1                      Vspeed = 0;
+ 849   1                      timer_tickB = timer_tick1;      
+ 850   1              }
+ 851   1              if(Atimer>0x02ff && Vtimer>0x02ff)
+ 852   1              {
+ 853   1                      dTimerTickV = dTimerTickV + ((timer_tick1 - timer_tickB) - dTimerTickV)*0.01;
+ 854   1                      dTimerTickA = dTimerTickA + ((timer_tick1 - timer_tickA) - dTimerTickA)*0.01;
+C51 COMPILER V9.00   SERVO                                                                 05/29/2012 08:00:48 PAGE 15  
+
+ 855   1                      Vspeed = FREQT1/(dTimerTickV*0.75);
+ 856   1              }
+ 857   1              timer_tick1 = timer_tick1 + 0x00010000;*/       
+ 858   1      
+ 859   1              SFRPAGE = SFRPAGE_SAVE;
+ 860   1              return;
+ 861   1      }
+ 862          
+ 863          //------------------------------------------------------------------------------------------
+ 864          void TIMER_ISR4 (void) interrupt 16
+ 865          {
+ 866   1              xdata char SFRPAGE_SAVE = SFRPAGE;
+ 867   1              SFRPAGE = TMR4_PAGE;
+ 868   1      
+ 869   1              
+ 870   1      
+ 871   1              SFRPAGE = SFRPAGE_SAVE;
+ 872   1              return;
+ 873   1      }
+ 874          //------------------------------------------------------------------------------------------
+ 875          
+ 876          
+ 877          //#endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2120    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =    221      46
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      17
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  7 WARNING(S),  0 ERROR(S)

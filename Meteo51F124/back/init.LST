@@ -1,0 +1,237 @@
+C51 COMPILER V9.00   INIT                                                                  06/06/2012 11:34:30 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE INIT
+OBJECT MODULE PLACED IN init.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.exe init.c DB OE BR
+
+line level    source
+
+   1          #include "c8051f120.h"
+   2          #include "init.h"
+   3          
+   4          //------------------------------------------------------------------------------------------
+   5          void Reset_Sources_Init()
+   6          {
+   7   1          WDTCN     = 0xDE;
+   8   1          WDTCN     = 0xAD;
+   9   1      }
+  10          
+  11          void Timer_Init()
+  12          {
+  13   1      
+  14   1      //---------------------------------------
+  15   1          SFRPAGE   = TIMER01_PAGE;
+  16   1          TCON      = 0x50;
+  17   1          TMOD      = 0x22;
+  18   1          TL0       = 0x4B;
+  19   1          TH0       = 0xA0;
+  20   1              TH1 = 0x4B;             
+  21   1              TL1 = 0x11;
+  22   1      
+  23   1      //GPS, скорость 4800 бод, тактируется Timer1 
+  24   1              SFRPAGE = UART1_PAGE;
+  25   1              SCON1 = 0x50;           
+  26   1              
+  27   1              SFRPAGE =0x00;
+  28   1              //CKCON = CKCON | 0x02; 
+  29   1              /*регистр управления тактированием
+  30   1                                                                              CKCON.3 = T0M = 1:      Timer 0 тактируется системным тактовым сигналом 
+  31   1                                                                              (т.е. биты CKCON.1 и CKCON.0 не влияют)
+  32   1                                                                              CKCON.1 = SCA1 = 1:     Биты выбора делителя частоты тактирования Timer 0, 1 
+  33   1                                                                              CKCON.0 = SCA0 = 0:     SYSCLK/48*/
+  34   1              CKCON = 0x02;
+  35   1      
+  36   1              //TMOD = TMOD | 0x20;           
+  37   1              /*Регистр режима Таймеров 0 и 1
+  38   1                                                                              TMOD.7 = GATE1 = 0: Таймер 1 включен, если TR1 = 1, независимо от логического уровня на входе /IN
+             -T1.
+  39   1                                                                              TMOD.6 = C/T1 = 0:  Т/С1  работает  как  таймер:  Таймер 1  инкрементируется  от  внутреннего  си
+             -гнала   
+  40   1                                                                                                      тактирования, который задается битом T1M (CKCON.4).  
+  41   1                                                                              TMOD.5 = T1M1 = 1,      
+  42   1                                                                              TMOD.4 = T1M0 = 0:      Выбор режима работы Таймера 1: 8-разрядный таймер/счетчик с автоперезагрузкой
+             -*/
+  43   1      
+  44   1      
+  45   1      
+  46   1      //COM, 115200, Timer2
+  47   1               SFRPAGE   = TMR2_PAGE;
+  48   1      
+  49   1               TMR2CF = 0x08; // Timer 2 Configuration
+  50   1          RCAP2L = 0xF3;  // Timer 2 Reload Register Low Byte   BaudRate = 115200
+  51   1          RCAP2H = 0xFF;  // Timer 2 Reload Register High Byte
+  52   1      
+C51 COMPILER V9.00   INIT                                                                  06/06/2012 11:34:30 PAGE 2   
+
+  53   1          TMR2L = 0x00;   // Timer 2 Low Byte
+  54   1          TMR2H = 0x00;   // Timer 2 High Byte
+  55   1          TMR2CN = 0x04;  // Timer 2 CONTROL
+  56   1               TR2 = 1;
+  57   1               SFRPAGE = UART0_PAGE;
+  58   1      
+  59   1               SCON0 = 0x50;
+  60   1               SSTA0 = 0x15;    
+  61   1      //SMBus, , Timer3
+  62   1          SFRPAGE   = TMR3_PAGE;
+  63   1          TMR3CN    = 0x04;
+  64   1          RCAP3L    = 0x9F;
+  65   1          RCAP3H    = 0x38;
+  66   1          SFRPAGE   = TMR4_PAGE;
+  67   1          RCAP4L    = 0xC6;
+  68   1          RCAP4H    = 0x06;
+  69   1      }
+  70          
+  71          void PCA_Init()
+  72          {
+  73   1          SFRPAGE   = PCA0_PAGE;
+  74   1          PCA0CN    = 0x40;
+  75   1          PCA0MD    = 0x01;
+  76   1          PCA0CPM0  = 0x40;
+  77   1          PCA0CPM1  = 0x40;
+  78   1          PCA0CPH0  = 0xFF;
+  79   1          PCA0CPH1  = 0xFF;
+  80   1      
+  81   1      }
+  82          
+  83          void SMBus_Init()
+  84          {
+  85   1          SFRPAGE   = SMB0_PAGE;
+  86   1          SMB0CN    = 0x41;
+  87   1      }
+  88          
+  89          void ADC_Init()
+  90          {
+  91   1          SFRPAGE   = ADC0_PAGE;
+  92   1          ADC0CN    = 0x80;
+  93   1      }
+  94          //------------------------------------------------------------------------------------------
+  95          void Port_IO_Init(void)
+  96          {
+  97   1          // P0.0  -  TX0 (UART0), Open-Drain, Digital
+  98   1          // P0.1  -  RX0 (UART0), Open-Drain, Digital
+  99   1          // P0.2  -  SDA (SMBus), Open-Drain, Digital
+ 100   1          // P0.3  -  SCL (SMBus), Open-Drain, Digital
+ 101   1          // P0.4  -  TX1 (UART1), Open-Drain, Digital
+ 102   1          // P0.5  -  RX1 (UART1), Open-Drain, Digital
+ 103   1          // P0.6  -  CEX0 (PCA),  Push-Pull,  Digital ШИМ
+ 104   1          // P0.7  -  CEX1 (PCA),  Push-Pull,  Digital ШИМ
+ 105   1      
+ 106   1          // P1.0  -  T0 (Timer0), Push-Pull,  Digital
+ 107   1          // P1.1  -  wind Speed INT0 (Tmr0), Push-Pull,  Digital
+ 108   1          // P1.2  -  T1 (Timer1), Push-Pull,  Digital
+ 109   1          // P1.3  -  wind Angle INT1 (Tmr1), Push-Pull,  Digital
+ 110   1          // P1.4  -  T2 (Timer2), Push-Pull,  Digital
+ 111   1               //P2.0 ЛИР CLOCK
+ 112   1               //P2.1 ЛИР DATA
+ 113   1      
+ 114   1          SFRPAGE   = CONFIG_PAGE;
+C51 COMPILER V9.00   INIT                                                                  06/06/2012 11:34:30 PAGE 3   
+
+ 115   1          P0MDOUT   = 0xC0;
+ 116   1          P1MDOUT   = 0xFF;
+ 117   1          P2MDOUT   = 0xFF;
+ 118   1          XBR0      = 0x15;
+ 119   1          XBR1      = 0x3E;
+ 120   1          XBR2      = 0x44;
+ 121   1      
+ 122   1      }
+ 123           
+ 124          void Oscillator_Init(void)
+ 125          {
+ 126   1          SFRPAGE   = CONFIG_PAGE;
+ 127   1          OSCICN    = 0x83;
+ 128   1      }
+ 129          
+ 130          void Interrupts_Init()
+ 131          {
+ 132   1          IE        = 0xBF;
+ 133   1          EIE1      = 0x0A;
+ 134   1          EIE2      = 0x43; 
+ 135   1      
+ 136   1         // IP        = 0x10;
+ 137   1         // EIP2      = 0x40;
+ 138   1      }
+ 139          
+ 140          void Init_Device(void)
+ 141          {
+ 142   1          Reset_Sources_Init();
+ 143   1          Timer_Init();
+ 144   1          PCA_Init();
+ 145   1          SMBus_Init();
+ 146   1               ADC_Init();
+ 147   1          Port_IO_Init();
+ 148   1          Oscillator_Init();
+ 149   1          Interrupts_Init();
+ 150   1      }
+ 151          //-----------------------------------------------------------------
+ 152          //GPS, скорость 4800 бод, тактируется Timer1 
+ 153          /*
+ 154          void UART1_Init(void)
+ 155          {
+ 156                  SFRPAGE = UART1_PAGE;
+ 157                  SCON1 = 0x10;                   /* Регистр управления COM1
+ 158                                                                                  SCON1.7 = S1MODE= 0: 8-ми разрядный COM-порт с изменяемой скоростью передачи данных
+ 159                                                                                  SCON1.5 = MCE1  = 0: (при S1MODE = SCON1.7 = 0) логический уровень стопового бита игнорируется
+ 160                                                                                  SCON1.4 = REN1 = 1: Разрешение приема   */
+ 161          /*      
+ 162                  SFRPAGE =0x00;
+ 163                  CKCON = CKCON | 0x02;   /*регистр управления тактированием
+ 164                                                                                  CKCON.3 = T0M = 1:      Timer 0 тактируется системным тактовым сигналом 
+ 165                                                                                  (т.е. биты CKCON.1 и CKCON.0 не влияют)
+ 166                                                                                  CKCON.1 = SCA1 = 1:     Биты выбора делителя частоты тактирования Timer 0, 1 
+ 167                                                                                  CKCON.0 = SCA0 = 0:     SYSCLK/48*/
+ 168          /*
+ 169                  TMOD = TMOD | 0x20;             /*Регистр режима Таймеров 0 и 1
+ 170                                                                                  TMOD.7 = GATE1 = 0: Таймер 1 включен, если TR1 = 1, независимо от логического уровня на входе /IN
+             -T1.
+ 171                                                                                  TMOD.6 = C/T1 = 0:  Т/С1  работает  как  таймер:  Таймер 1  инкрементируется  от  внутреннего  си
+             -гнала   
+ 172                                                                                                          тактирования, который задается битом T1M (CKCON.4).  
+ 173                                                                                  TMOD.5 = T1M1 = 1,      
+ 174                                                                                  TMOD.4 = T1M0 = 0:      Выбор режима работы Таймера 1: 8-разрядный таймер/счетчик с автоперезагрузкой
+C51 COMPILER V9.00   INIT                                                                  06/06/2012 11:34:30 PAGE 4   
+
+             -*/
+ 175          /*      TH1 = 148;              
+ 176                  TL1 = TH1;
+ 177                  TR1 = 1;  
+ 178          }*/
+ 179          //57600.Timer2------------------------------------------------------
+ 180          /*
+ 181          void UART0_Init(void)
+ 182          {
+ 183                  SFRPAGE = 0x00;
+ 184          
+ 185                  TMR2CF = 0x08; // Timer 2 Configuration
+ 186             RCAP2L = 0xF3;  // Timer 2 Reload Register Low Byte   BaudRate = 115200
+ 187             RCAP2H = 0xFF;  // Timer 2 Reload Register High Byte
+ 188          
+ 189             TMR2L = 0x00;   // Timer 2 Low Byte
+ 190             TMR2H = 0x00;   // Timer 2 High Byte
+ 191             TMR2CN = 0x04;  // Timer 2 CONTROL
+ 192                  TR2 = 1;
+ 193                  SFRPAGE = UART0_PAGE;
+ 194          
+ 195                  SCON0 = 0x50;
+ 196                  SSTA0 = 0x15;
+ 197          }
+ 198          */
+ 199          
+ 200          //------------------------------------------------------------------------------------------
+ 201          
+ 202          //#endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    188    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

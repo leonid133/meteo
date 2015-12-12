@@ -1,0 +1,239 @@
+BL51 BANKED LINKER/LOCATER V6.22              04/20/2012  16:16:48  PAGE 1
+
+
+BL51 BANKED LINKER/LOCATER V6.22, INVOKED BY:
+C:\KEIL\C51\BIN\BL51.EXE C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init.obj,
+>>  C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\servo.obj TO C:\Leonid 7\WorkD
+>> irectory\Meteo\Meteo51F124\1 RS (256) PL (68) PW (78)
+
+
+MEMORY MODEL: SMALL
+
+
+INPUT MODULES INCLUDED:
+  C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\init.obj (INIT)
+  C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\servo.obj (SERVO)
+  C:\KEIL\C51\LIB\C51S.LIB (?C_STARTUP)
+
+
+LINK MAP OF MODULE:  C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\1 (INIT)
+
+
+            TYPE    BASE      LENGTH    RELOCATION   SEGMENT NAME
+            -----------------------------------------------------
+
+            * * * * * * *   D A T A   M E M O R Y   * * * * * * *
+            REG     0000H     0008H     ABSOLUTE     "REG BANK 0"
+            IDATA   0008H     0008H     UNIT         ?ID?SERVO
+            IDATA   0010H     0001H     UNIT         ?STACK
+
+            * * * * * * *   C O D E   M E M O R Y   * * * * * * *
+            CODE    0000H     0003H     ABSOLUTE     
+            CODE    0003H     0152H     UNIT         ?PR?MAIN?SERVO
+            CODE    0155H     0016H     UNIT         ?PR?PCA_INIT?INIT
+            CODE    016BH     0013H     UNIT         ?PR?PORT_IO_INIT?INIT
+            CODE    017EH     0012H     UNIT         ?PR?TIMER_INIT?INIT
+            CODE    0190H     000CH     UNIT         ?C_C51STARTUP
+            CODE    019CH     000AH     UNIT         ?PR?INTERRUPTS_INIT?INIT
+            CODE    01A6H     0007H     UNIT         ?PR?OSCILLATOR_INIT?INIT
+
+
+
+OVERLAY MAP OF MODULE:   C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\1 (INIT)
+
+
+SEGMENT
+  +--> CALLED SEGMENT
+---------------------
+?C_C51STARTUP
+  +--> ?PR?MAIN?SERVO
+
+?PR?MAIN?SERVO
+  +--> ?PR?TIMER_INIT?INIT
+  +--> ?PR?PCA_INIT?INIT
+  +--> ?PR?PORT_IO_INIT?INIT
+  +--> ?PR?OSCILLATOR_INIT?INIT
+  +--> ?PR?INTERRUPTS_INIT?INIT
+
+
+
+SYMBOL TABLE OF MODULE:  C:\Leonid 7\WorkDirectory\Meteo\Meteo51F124\1 (INIT)
+
+  VALUE           TYPE          NAME
+  ----------------------------------
+
+  -------         MODULE        INIT
+  C:0000H         SYMBOL        _ICE_DUMMY_
+  D:00E6H         PUBLIC        EIE1
+  D:00E7H         PUBLIC        EIE2
+  D:00E8H         PUBLIC        ADC0CN
+BL51 BANKED LINKER/LOCATER V6.22            04/20/2012  16:16:48  PAGE 2
+
+
+  D:0084H         PUBLIC        SFRPAGE
+  D:00E8H         PUBLIC        ADC2CN
+  D:00A5H         PUBLIC        P1MDOUT
+  D:00A8H         PUBLIC        IE
+  D:00A6H         PUBLIC        P2MDOUT
+  D:00FCH         PUBLIC        PCA0CPH0
+  D:00FEH         PUBLIC        PCA0CPH1
+  C:016BH         PUBLIC        Port_IO_Init
+  D:00DAH         PUBLIC        PCA0CPM0
+  D:00D9H         PUBLIC        PCA0MD
+  D:00D8H         PUBLIC        PCA0CN
+  D:00DBH         PUBLIC        PCA0CPM1
+  D:00B8H         PUBLIC        IP
+  C:01A6H         PUBLIC        Oscillator_Init
+  D:00E1H         PUBLIC        XBR0
+  D:00E2H         PUBLIC        XBR1
+  D:00E3H         PUBLIC        XBR2
+  D:00C0H         PUBLIC        SMB0CN
+  D:0088H         PUBLIC        CPT0CN
+  D:0088H         PUBLIC        CPT1CN
+  D:00F8H         PUBLIC        SPI0CN
+  D:0089H         PUBLIC        TMOD
+  D:0088H         PUBLIC        TCON
+  D:00C8H         PUBLIC        TMR2CN
+  D:00C8H         PUBLIC        TMR3CN
+  D:00C8H         PUBLIC        TMR4CN
+  C:019CH         PUBLIC        Interrupts_Init
+  D:0097H         PUBLIC        CLKSEL
+  C:0155H         PUBLIC        PCA_Init
+  D:008AH         PUBLIC        TL0
+  D:0088H         PUBLIC        FLSTAT
+  D:0098H         PUBLIC        SCON0
+  D:0098H         PUBLIC        SCON1
+  D:008EH         PUBLIC        CKCON
+  C:017EH         PUBLIC        Timer_Init
+  D:00D0H         PUBLIC        PSW
+  -------         PROC          TIMER_INIT
+  C:017EH         LINE#         5
+  C:017EH         LINE#         6
+  C:017EH         LINE#         7
+  C:0181H         LINE#         9
+  C:0183H         LINE#         10
+  C:0186H         LINE#         11
+  C:0189H         LINE#         12
+  C:018CH         LINE#         13
+  C:018FH         LINE#         14
+  -------         ENDPROC       TIMER_INIT
+  -------         PROC          PCA_INIT
+  C:0155H         LINE#         16
+  C:0155H         LINE#         17
+  C:0155H         LINE#         18
+  C:0158H         LINE#         19
+  C:015BH         LINE#         20
+  C:015EH         LINE#         21
+  C:0161H         LINE#         22
+  C:0164H         LINE#         23
+  C:0167H         LINE#         24
+  C:016AH         LINE#         25
+  -------         ENDPROC       PCA_INIT
+  -------         PROC          PORT_IO_INIT
+  C:016BH         LINE#         27
+  C:016BH         LINE#         28
+  C:016BH         LINE#         42
+  C:016EH         LINE#         43
+  C:0171H         LINE#         44
+BL51 BANKED LINKER/LOCATER V6.22            04/20/2012  16:16:48  PAGE 3
+
+
+  C:0174H         LINE#         46
+  C:0177H         LINE#         47
+  C:017AH         LINE#         48
+  C:017DH         LINE#         51
+  -------         ENDPROC       PORT_IO_INIT
+  -------         PROC          OSCILLATOR_INIT
+  C:01A6H         LINE#         53
+  C:01A6H         LINE#         54
+  C:01A6H         LINE#         55
+  C:01A9H         LINE#         56
+  C:01ACH         LINE#         58
+  -------         ENDPROC       OSCILLATOR_INIT
+  -------         PROC          INTERRUPTS_INIT
+  C:019CH         LINE#         60
+  C:019CH         LINE#         61
+  C:019CH         LINE#         62
+  C:019FH         LINE#         63
+  C:01A2H         LINE#         64
+  C:01A5H         LINE#         65
+  -------         ENDPROC       INTERRUPTS_INIT
+  -------         ENDMOD        INIT
+
+  -------         MODULE        SERVO
+  C:0000H         SYMBOL        _ICE_DUMMY_
+  D:00E8H         PUBLIC        ADC0CN
+  D:0084H         PUBLIC        SFRPAGE
+  D:00E8H         PUBLIC        ADC2CN
+  D:00A8H         PUBLIC        IE
+  I:0008H         PUBLIC        delay
+  D:00FCH         PUBLIC        PCA0CPH0
+  D:00FEH         PUBLIC        PCA0CPH1
+  D:00D8H         PUBLIC        PCA0CN
+  D:00B8H         PUBLIC        IP
+  I:000AH         PUBLIC        i2
+  D:00C0H         PUBLIC        SMB0CN
+  C:0003H         PUBLIC        main
+  D:0088H         PUBLIC        CPT0CN
+  D:0088H         PUBLIC        CPT1CN
+  D:00F8H         PUBLIC        SPI0CN
+  D:0088H         PUBLIC        TCON
+  D:00C8H         PUBLIC        TMR2CN
+  D:00C8H         PUBLIC        TMR3CN
+  D:00C8H         PUBLIC        TMR4CN
+  I:000CH         PUBLIC        delay2
+  D:0088H         PUBLIC        FLSTAT
+  D:0098H         PUBLIC        SCON0
+  D:0098H         PUBLIC        SCON1
+  I:000EH         PUBLIC        i
+  D:00D0H         PUBLIC        PSW
+  -------         PROC          MAIN
+  C:0003H         LINE#         10
+  C:0003H         LINE#         11
+  C:0003H         LINE#         12
+  C:0006H         LINE#         13
+  C:0009H         LINE#         14
+  C:000CH         LINE#         15
+  C:000FH         LINE#         16
+  C:0012H         LINE#         18
+  C:0019H         LINE#         19
+  C:0020H         LINE#         20
+  C:0023H         LINE#         25
+  C:0027H         LINE#         26
+  C:0027H         LINE#         27
+  C:0029H         LINE#         28
+  C:003CH         LINE#         29
+BL51 BANKED LINKER/LOCATER V6.22            04/20/2012  16:16:48  PAGE 4
+
+
+  C:0047H         LINE#         30
+  C:0058H         LINE#         31
+  C:006BH         LINE#         32
+  C:0075H         LINE#         33
+  C:007BH         LINE#         34
+  C:007BH         LINE#         35
+  C:007DH         LINE#         36
+  C:0090H         LINE#         37
+  C:009BH         LINE#         38
+  C:00ACH         LINE#         44
+  C:00BFH         LINE#         45
+  C:00C9H         LINE#         47
+  C:00CFH         LINE#         48
+  C:00CFH         LINE#         49
+  C:00D1H         LINE#         50
+  C:00E4H         LINE#         51
+  C:00EFH         LINE#         52
+  C:0100H         LINE#         53
+  C:0113H         LINE#         54
+  C:011DH         LINE#         55
+  C:0123H         LINE#         56
+  C:0123H         LINE#         57
+  C:0125H         LINE#         58
+  C:0138H         LINE#         59
+  C:0143H         LINE#         60
+  C:0154H         LINE#         64
+  -------         ENDPROC       MAIN
+  -------         ENDMOD        SERVO
+
+Program Size: data=17.0 xdata=0 code=429
+LINK/LOCATE RUN COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,27 @@
+	while (flTransmiter)
+		;			
+   BufferInModem[0] = 20 | 0x40;
+	if(flKoord)
+   {
+     	OutModem4(LatFly, 1);
+      OutModem4(LonFly, 5);
+      OutModem2(koors, 9);	//курс
+      BufferInModem[11] = 0x80 | (unsigned char)Vz;	   //Vзем
+	}
+   else
+   {
+   	BufferInModem[1] = 0x80;	   
+      BufferInModem[2] = 0x80;	   
+      BufferInModem[3] = 0x80;	   
+      BufferInModem[4] = 0xff;	   
+      BufferInModem[5] = 0x80;	   
+      BufferInModem[6] = 0x80;	   
+      BufferInModem[7] = 0x80;	   
+      BufferInModem[8] = 0x80;	   
+      BufferInModem[9] = 0x80;	   
+      BufferInModem[10] = 0x80;	   
+      BufferInModem[11] = 0x80;	   
+   }
+ 	 
+   OutModem2(H_filtr+5000, 12);
+	OutModem2(V_dat*10, 14);

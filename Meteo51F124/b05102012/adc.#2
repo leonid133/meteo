@@ -1,0 +1,122 @@
+//-----------------------------------------------------------------------------
+// Includes
+//-----------------------------------------------------------------------------
+
+#include <c8051f120.h>                 // SFR declarations
+#include <stdio.h>                     
+#include "init.h"
+
+//-----------------------------------------------------------------------------
+// 16-bit SFR Definitions for 'F12x
+//-----------------------------------------------------------------------------
+
+sfr16 ADC0     = 0xbe;                 // ADC0 data
+sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+sfr16 TMR2     = 0xcc;                 // Timer2
+sfr16 TMR3     = 0xcc;                 // Timer3
+
+//-----------------------------------------------------------------------------
+// Global Constants
+//-----------------------------------------------------------------------------
+
+#define BAUDRATE     115200            // Baud rate of UART in bps
+#define SYSCLK       49000000          // Output of PLL derived from (INTCLK*2)
+
+//#define INT_DEC      256               // Integrate and decimate ratio
+
+
+#define SAMPLE_DELAY 100                // Delay in ms before taking sample
+
+//-----------------------------------------------------------------------------
+// Function Prototypes
+//-----------------------------------------------------------------------------
+
+void adc (void);
+void Wait_MS(unsigned int ms);
+
+//-----------------------------------------------------------------------------
+// Global Variables
+//-----------------------------------------------------------------------------
+
+xdata long Result;                           // ADC0 decimated value
+xdata unsigned int_dec = 256;    // Integrate/decimate counter
+                                        // we post a new result when
+                                       // int_dec = 0
+xdata long accumulator = 0L;         // Here's where we integrate the
+                                       // ADC samples
+//-----------------------------------------------------------------------------
+
+void adc (void)
+{
+   long measurement;                   // Measured voltage in mV
+
+     // The 12-bit ADC value is averaged across INT_DEC measurements.  The result is 
+      // then stored in Result, and is right-justified 
+      // The measured voltage applied to AIN 0.1 is then:
+      //
+      //                           Vref (mV)
+      //   measurement (mV) =   --------------- * Result (bits) 
+      //                       (2^12)-1 (bits)
+
+    measurement =  Result * 2430 / 4095;
+
+    EA = 1;                          // Re-enable interrupts
+
+    SFRPAGE = UART0_PAGE;
+
+    printf("AIN0.1 voltage: %ld mV\n",measurement);
+
+}
+
+
+//-----------------------------------------------------------------------------
+
+void ADC0_ISR (void) interrupt 15
+{
+   AD0INT = 0;                         // Clear ADC conversion complete
+                                       // indicator
+   accumulator += ADC0;                // Read ADC value and add to running
+                                       // total
+   int_dec--;                          // Update decimation counter
+
+   if (int_dec == 0)                   // If zero, then post result
+   {
+      int_dec = 256;               // Reset counter
+      Result = accumulator >> 8;
+      accumulator = 0L;                // Reset accumulator
+   }
+}
+
+//-----------------------------------------------------------------------------
+void Wait_MS(unsigned int ms)
+{
+   char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+
+   SFRPAGE = TMR2_PAGE;
+
+   TMR2CN = 0x00;                      // Stop Timer3; Clear TF3;
+   TMR2CF = 0x00;                      // use SYSCLK/12 as timebase
+
+   RCAP2 = -(SYSCLK/1000/12);          // Timer 2 overflows at 1 kHz
+   TMR2 = RCAP2;
+
+   ET2 = 0;                            // Disable Timer 2 interrupts
+
+   TR2 = 1;                            // Start Timer 2
+
+   while(ms)
+   {
+      TF2 = 0;                         // Clear flag to initialize
+      while(!TF2);                     // Wait until timer overflows
+      ms--;                            // Decrement ms
+   }
+
+   TR2 = 0;                            // Stop Timer 2
+
+   SFRPAGE = SFRPAGE_SAVE;             // Restore SFRPAGE
+}
+
+//-----------------------------------------------------------------------------
+// End Of File
+//-----------------------------------------------------------------------------
